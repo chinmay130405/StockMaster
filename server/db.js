@@ -1,137 +1,160 @@
 /**
- * Database initialization and helper functions using better-sqlite3
- * Manages SQLite connection and schema creation
+ * Database initialization and helper functions using PostgreSQL
+ * Manages PostgreSQL connection pool and queries
  */
 
-const Database = require('better-sqlite3');
-const path = require('path');
+const { Pool } = require('pg');
 require('dotenv').config();
 
-const DB_FILE = process.env.DB_FILE || './database.db';
-const db = new Database(DB_FILE);
+// Create PostgreSQL connection pool
+const pool = new Pool({
+  host: process.env.DB_HOST || 'localhost',
+  port: process.env.DB_PORT || 5432,
+  database: process.env.DB_NAME || 'stockmaster',
+  user: process.env.DB_USER || 'postgres',
+  password: process.env.DB_PASSWORD,
+  max: 20, // Maximum number of clients in the pool
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 2000,
+});
 
-// Enable WAL mode for better concurrency
-db.pragma('journal_mode = WAL');
+// Test database connection
+pool.on('connect', () => {
+  console.log('✅ Connected to PostgreSQL database');
+});
+
+pool.on('error', (err) => {
+  console.error('❌ Unexpected error on idle client', err);
+  process.exit(-1);
+});
+
 
 /**
- * Initialize database schema
- * Creates users table with all required fields for auth and OTP
+ * Initialize database schema (tables should already exist from dump restore)
+ * This function is kept for compatibility but won't recreate tables
  */
-function initDatabase() {
-  const createTableSQL = `
-    CREATE TABLE IF NOT EXISTS users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      loginId TEXT UNIQUE NOT NULL,
-      email TEXT UNIQUE NOT NULL,
-      passwordHash TEXT NOT NULL,
-      createdAt INTEGER NOT NULL,
-      otpHash TEXT,
-      otpExpires INTEGER,
-      otpAttempts INTEGER DEFAULT 0,
-      lastOtpRequest INTEGER
-    )
-  `;
-
-  db.exec(createTableSQL);
-  
-  // Create indexes for faster lookups
-  db.exec('CREATE INDEX IF NOT EXISTS idx_loginId ON users(loginId)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_email ON users(email)');
-  
-  console.log('✅ Database initialized successfully');
+async function initDatabase() {
+  try {
+    // Test connection
+    const result = await pool.query('SELECT NOW()');
+    console.log('✅ Database connection verified:', result.rows[0].now);
+    
+    // Check if users table exists
+    const tableCheck = await pool.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_name = 'users'
+      );
+    `);
+    
+    if (tableCheck.rows[0].exists) {
+      console.log('✅ Users table found in database');
+    } else {
+      console.warn('⚠️  Users table not found. Database may need to be restored from dump.');
+    }
+  } catch (err) {
+    console.error('❌ Database initialization error:', err);
+    throw err;
+  }
 }
 
 /**
  * Get user by loginId
  */
-function getUserByLoginId(loginId) {
-  const stmt = db.prepare('SELECT * FROM users WHERE loginId = ?');
-  return stmt.get(loginId);
+async function getUserByLoginId(loginId) {
+  const result = await pool.query(
+    'SELECT * FROM users WHERE "loginId" = $1',
+    [loginId]
+  );
+  return result.rows[0];
 }
 
 /**
  * Get user by email
  */
-function getUserByEmail(email) {
-  const stmt = db.prepare('SELECT * FROM users WHERE email = ?');
-  return stmt.get(email);
+async function getUserByEmail(email) {
+  const result = await pool.query(
+    'SELECT * FROM users WHERE email = $1',
+    [email]
+  );
+  return result.rows[0];
 }
 
 /**
  * Create new user
  */
-function createUser(loginId, email, passwordHash) {
-  const stmt = db.prepare(`
-    INSERT INTO users (loginId, email, passwordHash, createdAt)
-    VALUES (?, ?, ?, ?)
-  `);
-  
-  const result = stmt.run(loginId, email, passwordHash, Date.now());
-  return result.lastInsertRowid;
+async function createUser(loginId, email, passwordHash) {
+  const result = await pool.query(
+    `INSERT INTO users ("loginId", email, "passwordHash", "createdAt")
+     VALUES ($1, $2, $3, $4)
+     RETURNING id`,
+    [loginId, email, passwordHash, new Date()]
+  );
+  return result.rows[0].id;
 }
 
 /**
  * Update user's OTP information
  */
-function updateUserOTP(email, otpHash, otpExpires) {
-  const stmt = db.prepare(`
-    UPDATE users 
-    SET otpHash = ?, otpExpires = ?, otpAttempts = 0, lastOtpRequest = ?
-    WHERE email = ?
-  `);
-  
-  stmt.run(otpHash, otpExpires, Date.now(), email);
+async function updateUserOTP(email, otpHash, otpExpires) {
+  await pool.query(
+    `UPDATE users 
+     SET "otpHash" = $1, "otpExpires" = $2, "otpAttempts" = 0, "lastOtpRequest" = $3
+     WHERE email = $4`,
+    [otpHash, new Date(otpExpires), new Date(), email]
+  );
 }
 
 /**
  * Increment OTP attempts counter
  */
-function incrementOtpAttempts(email) {
-  const stmt = db.prepare(`
-    UPDATE users 
-    SET otpAttempts = otpAttempts + 1
-    WHERE email = ?
-  `);
-  
-  stmt.run(email);
+async function incrementOtpAttempts(email) {
+  await pool.query(
+    `UPDATE users 
+     SET "otpAttempts" = "otpAttempts" + 1
+     WHERE email = $1`,
+    [email]
+  );
 }
 
 /**
  * Clear OTP data after successful verification
  */
-function clearUserOTP(email) {
-  const stmt = db.prepare(`
-    UPDATE users 
-    SET otpHash = NULL, otpExpires = NULL, otpAttempts = 0
-    WHERE email = ?
-  `);
-  
-  stmt.run(email);
+async function clearUserOTP(email) {
+  await pool.query(
+    `UPDATE users 
+     SET "otpHash" = NULL, "otpExpires" = NULL, "otpAttempts" = 0
+     WHERE email = $1`,
+    [email]
+  );
 }
 
 /**
  * Update user password
  */
-function updateUserPassword(email, passwordHash) {
-  const stmt = db.prepare(`
-    UPDATE users 
-    SET passwordHash = ?
-    WHERE email = ?
-  `);
-  
-  stmt.run(passwordHash, email);
+async function updateUserPassword(email, passwordHash) {
+  await pool.query(
+    `UPDATE users 
+     SET "passwordHash" = $1
+     WHERE email = $2`,
+    [passwordHash, email]
+  );
 }
 
 /**
  * Get user by ID (for JWT payload verification)
  */
-function getUserById(id) {
-  const stmt = db.prepare('SELECT id, loginId, email, createdAt FROM users WHERE id = ?');
-  return stmt.get(id);
+async function getUserById(id) {
+  const result = await pool.query(
+    'SELECT id, "loginId", email, "createdAt" FROM users WHERE id = $1',
+    [id]
+  );
+  return result.rows[0];
 }
 
 module.exports = {
-  db,
+  pool,
   initDatabase,
   getUserByLoginId,
   getUserByEmail,
