@@ -36,9 +36,9 @@ function MoveHistory() {
       // Calculate stats
       const statsData = {
         total: data.length,
-        receipts: data.filter(m => m.movement_type === 'in').length,
-        deliveries: data.filter(m => m.movement_type === 'out').length,
-        adjustments: data.filter(m => m.movement_type === 'adjustment').length
+        receipts: data.filter(m => m.movement_type === 'receipt').length,
+        deliveries: data.filter(m => m.movement_type === 'delivery').length,
+        adjustments: data.filter(m => m.movement_type === 'transfer').length
       };
       setStats(statsData);
     } catch (error) {
@@ -50,9 +50,9 @@ function MoveHistory() {
 
   const filteredMovements = movements.filter(item => {
     if (filterType === 'all') return true;
-    if (filterType === 'receipt') return item.movement_type === 'in';
-    if (filterType === 'delivery') return item.movement_type === 'out';
-    if (filterType === 'adjustment') return item.movement_type === 'adjustment';
+    if (filterType === 'receipt') return item.movement_type === 'receipt';
+    if (filterType === 'delivery') return item.movement_type === 'delivery';
+    if (filterType === 'adjustment') return item.movement_type === 'transfer';
     return true;
   });
 
@@ -70,12 +70,12 @@ function MoveHistory() {
 
   const getMovementTypeBadge = (type) => {
     const types = {
-      in: { bg: '#dbeafe', color: '#1e40af', label: 'Receipt' },
-      out: { bg: '#fef3c7', color: '#92400e', label: 'Delivery' },
-      adjustment: { bg: '#f3e8ff', color: '#6b21a8', label: 'Adjustment' }
+      receipt: { bg: '#dbeafe', color: '#1e40af', label: 'Receipt' },
+      delivery: { bg: '#fef3c7', color: '#92400e', label: 'Delivery' },
+      transfer: { bg: '#f3e8ff', color: '#6b21a8', label: 'Transfer' }
     };
 
-    const typeInfo = types[type] || types.adjustment;
+    const typeInfo = types[type] || types.transfer;
 
     return (
       <span style={{
@@ -205,7 +205,7 @@ function MoveHistory() {
                     <th style={{ padding: '12px', textAlign: 'left', fontWeight: '600', color: '#1e293b' }}>Date/Time</th>
                     <th style={{ padding: '12px', textAlign: 'left', fontWeight: '600', color: '#1e293b' }}>Type</th>
                     <th style={{ padding: '12px', textAlign: 'left', fontWeight: '600', color: '#1e293b' }}>Product</th>
-                    <th style={{ padding: '12px', textAlign: 'left', fontWeight: '600', color: '#1e293b' }}>Location</th>
+                    <th style={{ padding: '12px', textAlign: 'left', fontWeight: '600', color: '#1e293b' }}>Reference</th>
                     <th style={{ padding: '12px', textAlign: 'right', fontWeight: '600', color: '#1e293b' }}>Quantity</th>
                     <th style={{ padding: '12px', textAlign: 'left', fontWeight: '600', color: '#1e293b' }}>Document</th>
                   </tr>
@@ -213,7 +213,7 @@ function MoveHistory() {
                 <tbody>
                   {filteredMovements.map((item, index) => (
                     <tr key={index} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                      <td style={{ padding: '12px' }}>{formatDate(item.created_at)}</td>
+                      <td style={{ padding: '12px' }}>{formatDate(item.movement_date || item.created_at)}</td>
                       <td style={{ padding: '12px' }}>
                         {getMovementTypeBadge(item.movement_type)}
                       </td>
@@ -224,12 +224,13 @@ function MoveHistory() {
                         )}
                       </td>
                       <td style={{ padding: '12px' }}>
-                        <div>{item.location_name}</div>
-                        <div style={{ fontSize: '12px', color: '#64748b' }}>{item.warehouse_name}</div>
+                        <div style={{ fontSize: '13px' }}>{item.reference || 'N/A'}</div>
                       </td>
                       <td style={{ padding: '12px', textAlign: 'right', fontWeight: '600' }}>
-                        <span style={{ color: item.movement_type === 'in' ? '#16a34a' : item.movement_type === 'out' ? '#dc2626' : '#6b21a8' }}>
-                          {item.movement_type === 'in' ? '+' : item.movement_type === 'out' ? '-' : '±'}{item.quantity} {item.uom}
+                        <span style={{ 
+                          color: item.direction === 'in' ? '#16a34a' : item.direction === 'out' ? '#dc2626' : '#6b21a8' 
+                        }}>
+                          {item.direction === 'in' ? '+' : item.direction === 'out' ? '-' : '↔'}{item.quantity} {item.uom || ''}
                         </span>
                       </td>
                       <td style={{ padding: '12px', color: '#3b82f6', fontWeight: '600' }}>

@@ -8,14 +8,35 @@ function Dashboard() {
     totalProducts: 0,
     totalWarehouses: 0,
     totalLocations: 0,
-    pendingReceipts: 4,
-    pendingDeliveries: 4,
+    pendingReceipts: 0,
+    pendingDeliveries: 0,
     lowStockItems: 0
   });
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('Dashboard');
 
   const tabs = ['Dashboard', 'Operations', 'Products', 'Move History', 'Settings'];
+  
+  // Fetch dashboard stats on component mount
+  useEffect(() => {
+    fetchDashboardStats();
+  }, []);
+  
+  const fetchDashboardStats = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const response = await axios.get('http://localhost:5000/api/inventory/dashboard-stats');
+      console.log('Dashboard stats received:', response.data);
+      setStats(response.data);
+    } catch (err) {
+      console.error('Error fetching dashboard stats:', err);
+      setError('Failed to load dashboard data');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const navigateToTab = (tab) => {
     setActiveTab(tab);
@@ -44,6 +65,36 @@ function Dashboard() {
     return (
       <div style={{ padding: '40px', textAlign: 'center' }}>
         <p>Loading dashboard...</p>
+      </div>
+    );
+  }
+  
+  if (error) {
+    return (
+      <div style={{ padding: '40px', textAlign: 'center' }}>
+        <div style={{ 
+          backgroundColor: '#ffebee', 
+          color: '#c62828', 
+          padding: '20px', 
+          borderRadius: '4px',
+          marginBottom: '20px'
+        }}>
+          <p style={{ margin: '0 0 10px 0', fontWeight: '600' }}>Error Loading Dashboard</p>
+          <p style={{ margin: 0 }}>{error}</p>
+        </div>
+        <button 
+          onClick={fetchDashboardStats}
+          style={{
+            padding: '10px 20px',
+            backgroundColor: '#1976d2',
+            color: 'white',
+            border: 'none',
+            borderRadius: '4px',
+            cursor: 'pointer'
+          }}
+        >
+          Retry
+        </button>
       </div>
     );
   }

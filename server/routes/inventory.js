@@ -481,6 +481,146 @@ router.put('/receipts/:id/process', async (req, res) => {
 });
 
 /**
+ * GET /api/inventory/stock-movements
+ * Get all stock movements (receipts, deliveries, internal transfers)
+ */
+router.get('/stock-movements', async (req, res) => {
+  try {
+    const { pool } = require('../db');
+    const { startDate, endDate, movementType } = req.query;
+
+    const movements = [];
+
+    // Get receipt movements
+    const receiptsQuery = `
+      SELECT 
+        rl.id,
+        'receipt' as movement_type,
+        'in' as direction,
+        rl.quantity,
+        r.receipt_no as document_no,
+        r.receipt_date as movement_date,
+        p.name as product_name,
+        p.sku,
+        p.uom,
+        r.supplier_invoice_no as reference,
+        r.status,
+        r.created_at
+      FROM receipt_lines rl
+      JOIN receipts r ON rl.receipt_id = r.id
+      JOIN products p ON rl.product_id = p.id
+      WHERE 1=1
+      ${startDate ? "AND r.receipt_date >= $1" : ""}
+      ${endDate ? "AND r.receipt_date <= $2" : ""}
+      ORDER BY r.receipt_date DESC
+      LIMIT 200
+    `;
+
+    const receiptParams = [];
+    if (startDate) receiptParams.push(startDate);
+    if (endDate) receiptParams.push(endDate);
+
+    const receiptsResult = await pool.query(receiptsQuery, receiptParams);
+    movements.push(...receiptsResult.rows);
+
+    // Get delivery movements
+    const deliveriesQuery = `
+      SELECT 
+        dl.id,
+        'delivery' as movement_type,
+        'out' as direction,
+        dl.quantity,
+        d.delivery_no as document_no,
+        d.delivery_date as movement_date,
+        p.name as product_name,
+        p.sku,
+        p.uom,
+        d.delivery_address as reference,
+        d.status,
+        d.created_at
+      FROM delivery_lines dl
+      JOIN deliveries d ON dl.delivery_id = d.id
+      JOIN products p ON dl.product_id = p.id
+      WHERE 1=1
+      ${startDate ? "AND d.delivery_date >= $1" : ""}
+      ${endDate ? "AND d.delivery_date <= $2" : ""}
+      ORDER BY d.delivery_date DESC
+      LIMIT 200
+    `;
+
+    const deliveryParams = [];
+    if (startDate) deliveryParams.push(startDate);
+    if (endDate) deliveryParams.push(endDate);
+
+    const deliveriesResult = await pool.query(deliveriesQuery, deliveryParams);
+    movements.push(...deliveriesResult.rows);
+
+    // Get internal transfer movements
+    const transfersQuery = `
+      SELECT 
+        itl.id,
+        'transfer' as movement_type,
+        'transfer' as direction,
+        itl.quantity,
+        it.transfer_no as document_no,
+        it.created_at as movement_date,
+        p.name as product_name,
+        p.sku,
+        p.uom,
+        l_from.name || ' → ' || l_to.name as reference,
+        it.status,
+        it.created_at
+      FROM internal_transfer_lines itl
+      JOIN internal_transfers it ON itl.transfer_id = it.id
+      JOIN products p ON itl.product_id = p.id
+      LEFT JOIN locations l_from ON it.from_location = l_from.id
+      LEFT JOIN locations l_to ON it.to_location = l_to.id
+      WHERE 1=1
+      ${startDate ? "AND it.created_at >= $1" : ""}
+      ${endDate ? "AND it.created_at <= $2" : ""}
+      ORDER BY it.created_at DESC
+      LIMIT 200
+    `;
+
+    const transferParams = [];
+    if (startDate) transferParams.push(startDate);
+    if (endDate) transferParams.push(endDate);
+
+    const transfersResult = await pool.query(transfersQuery, transferParams);
+    movements.push(...transfersResult.rows);
+
+    // Sort all movements by date
+    movements.sort((a, b) => new Date(b.movement_date || b.created_at) - new Date(a.movement_date || a.created_at));
+
+    // Apply movement type filter if specified
+    let filteredMovements = movements;
+    if (movementType) {
+      if (movementType === 'in') {
+        filteredMovements = movements.filter(m => m.direction === 'in');
+      } else if (movementType === 'out') {
+        filteredMovements = movements.filter(m => m.direction === 'out');
+      } else if (movementType === 'adjustment' || movementType === 'transfer') {
+        filteredMovements = movements.filter(m => m.movement_type === 'transfer');
+      }
+    }
+
+    console.log(`✅ Retrieved ${filteredMovements.length} stock movements (${receiptsResult.rows.length} receipts, ${deliveriesResult.rows.length} deliveries, ${transfersResult.rows.length} transfers)`);
+
+    res.status(200).json({
+      success: true,
+      count: filteredMovements.length,
+      movements: filteredMovements
+    });
+  } catch (error) {
+    console.error('Get stock movements error:', error);
+    res.status(500).json({ 
+      error: 'Database error',
+      details: error.message
+    });
+  }
+});
+
+/**
  * GET /api/inventory/dashboard-stats
  * Get dashboard statistics
  */
@@ -500,16 +640,22 @@ router.get('/dashboard-stats', async (req, res) => {
     const locationsResult = await pool.query('SELECT COUNT(*) as count FROM locations');
     const totalLocations = parseInt(locationsResult.rows[0].count);
     
-    // Get pending receipts (status != 'done')
-    const receiptsResult = await pool.query("SELECT COUNT(*) as count FROM receipts WHERE status != 'done'");
+    // Get pending receipts (status != 'Done')
+    const receiptsResult = await pool.query("SELECT COUNT(*) as count FROM receipts WHERE status != 'Done'");
     const pendingReceipts = parseInt(receiptsResult.rows[0].count);
     
-    // Get pending deliveries (status != 'done')
-    const deliveriesResult = await pool.query("SELECT COUNT(*) as count FROM deliveries WHERE status != 'done'");
+    // Get pending deliveries (status != 'Done')
+    const deliveriesResult = await pool.query("SELECT COUNT(*) as count FROM deliveries WHERE status != 'Done'");
     const pendingDeliveries = parseInt(deliveriesResult.rows[0].count);
     
-    // Get low stock items (available_quantity < 10)
-    const lowStockResult = await pool.query('SELECT COUNT(DISTINCT product_id) as count FROM stock_levels WHERE available_quantity < 10');
+    // Get low stock items (quantity < reorder_level)
+    const lowStockResult = await pool.query(`
+      SELECT COUNT(DISTINCT p.id) as count 
+      FROM products p
+      LEFT JOIN stock_levels sl ON p.id = sl.product_id
+      WHERE p.reorder_level IS NOT NULL 
+      AND COALESCE(sl.quantity, 0) < p.reorder_level
+    `);
     const lowStockItems = parseInt(lowStockResult.rows[0].count);
     
     const stats = {
@@ -526,83 +672,6 @@ router.get('/dashboard-stats', async (req, res) => {
     res.status(200).json(stats);
   } catch (error) {
     console.error('Get dashboard stats error:', error);
-    res.status(500).json({ 
-      error: 'Database error',
-      details: error.message
-    });
-  }
-});
-
-/**
- * GET /api/inventory/stock-movements
- * Get all stock movements (move history)
- */
-router.get('/stock-movements', async (req, res) => {
-  try {
-    const { pool } = require('../db');
-    const { startDate, endDate, movementType } = req.query;
-
-    let query = `
-      SELECT 
-        sm.id,
-        sm.movement_type,
-        sm.quantity,
-        sm.reference_type,
-        sm.reference_id,
-        sm.created_at,
-        p.name as product_name,
-        p.sku,
-        p.uom,
-        l.name as location_name,
-        w.name as warehouse_name,
-        CASE 
-          WHEN sm.reference_type = 'receipt' THEN r.document_no
-          WHEN sm.reference_type = 'delivery' THEN d.document_no
-          ELSE sm.notes
-        END as document_no
-      FROM stock_movements sm
-      JOIN products p ON sm.product_id = p.id
-      JOIN locations l ON sm.location_id = l.id
-      JOIN warehouses w ON l.warehouse_id = w.id
-      LEFT JOIN receipts r ON sm.reference_type = 'receipt' AND sm.reference_id = r.id
-      LEFT JOIN deliveries d ON sm.reference_type = 'delivery' AND sm.reference_id = d.id
-      WHERE 1=1
-    `;
-
-    const params = [];
-    let paramCount = 1;
-
-    if (startDate) {
-      query += ` AND sm.created_at >= $${paramCount}`;
-      params.push(startDate);
-      paramCount++;
-    }
-
-    if (endDate) {
-      query += ` AND sm.created_at <= $${paramCount}`;
-      params.push(endDate);
-      paramCount++;
-    }
-
-    if (movementType) {
-      query += ` AND sm.movement_type = $${paramCount}`;
-      params.push(movementType);
-      paramCount++;
-    }
-
-    query += ' ORDER BY sm.created_at DESC LIMIT 500';
-
-    const result = await pool.query(query, params);
-
-    console.log(`✅ Retrieved ${result.rows.length} stock movements`);
-
-    res.status(200).json({
-      success: true,
-      count: result.rows.length,
-      movements: result.rows
-    });
-  } catch (error) {
-    console.error('Get stock movements error:', error);
     res.status(500).json({ 
       error: 'Database error',
       details: error.message
