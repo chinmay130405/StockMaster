@@ -297,6 +297,115 @@ router.get('/receipts', authenticateToken, async (req, res) => {
   }
 });
 
+/**
+ * POST /api/data/receipts
+ * Create a new receipt
+ */
+router.post('/receipts', authenticateToken, async (req, res) => {
+  try {
+    const { receipt_no, supplier_id, schedule_date, status, products } = req.body;
+    
+    // Start a transaction
+    const client = await pgPool.connect();
+    
+    try {
+      await client.query('BEGIN');
+      
+      // Insert receipt (using receipt_date which is the actual column name)
+      const receiptResult = await client.query(`
+        INSERT INTO receipts (receipt_no, supplier_id, receipt_date, status, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, NOW(), NOW())
+        RETURNING *
+      `, [receipt_no, supplier_id, schedule_date, status || 'draft']);
+      
+      const receiptId = receiptResult.rows[0].id;
+      
+      // Insert receipt lines and stock ledger entries if products exist
+      if (products && products.length > 0) {
+        for (const product of products) {
+          // Insert receipt line
+          await client.query(`
+            INSERT INTO receipt_lines (receipt_id, product_id, quantity, created_at, updated_at)
+            VALUES ($1, $2, $3, NOW(), NOW())
+          `, [receiptId, product.product_id, product.quantity]);
+          
+          // Get product details for stock ledger
+          const productResult = await client.query(
+            'SELECT sku, uom FROM products WHERE id = $1',
+            [product.product_id]
+          );
+          
+          // Get or create default warehouse location
+          const locationResult = await client.query(
+            "SELECT id FROM locations WHERE code = 'WH/Stock' LIMIT 1"
+          );
+          const toLocationId = locationResult.rows[0]?.id;
+          
+          // Insert into stock_ledger for move history
+          await client.query(`
+            INSERT INTO stock_ledger (
+              occurred_at, event_type, product_id, qty_delta, uom,
+              from_location, to_location, source_type, source_id, created_by
+            )
+            VALUES (NOW(), 'receipt', $1, $2, $3, NULL, $4, 'receipt', $5, NULL)
+          `, [
+            product.product_id,
+            product.quantity,
+            productResult.rows[0]?.uom || 'Units',
+            toLocationId,
+            receiptId
+          ]);
+        }
+      }
+      
+      await client.query('COMMIT');
+      
+      res.status(201).json({
+        success: true,
+        data: receiptResult.rows[0]
+      });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    console.error('Error creating receipt:', error);
+    res.status(500).json({ success: false, error: 'Failed to create receipt' });
+  }
+});
+
+/**
+ * PUT /api/data/receipts/:id
+ * Update receipt status
+ */
+router.put('/receipts/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    
+    const result = await pgPool.query(`
+      UPDATE receipts
+      SET status = $1, updated_at = NOW()
+      WHERE id = $2
+      RETURNING *
+    `, [status, id]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Receipt not found' });
+    }
+    
+    res.status(200).json({
+      success: true,
+      data: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error updating receipt:', error);
+    res.status(500).json({ success: false, error: 'Failed to update receipt' });
+  }
+});
+
 // ==================== DELIVERIES ====================
 
 /**
@@ -329,6 +438,115 @@ router.get('/deliveries', authenticateToken, async (req, res) => {
   }
 });
 
+/**
+ * POST /api/data/deliveries
+ * Create a new delivery
+ */
+router.post('/deliveries', authenticateToken, async (req, res) => {
+  try {
+    const { delivery_no, order_id, delivery_address, schedule_date, status, products } = req.body;
+    
+    // Start a transaction
+    const client = await pgPool.connect();
+    
+    try {
+      await client.query('BEGIN');
+      
+      // Insert delivery (using delivery_date which is the actual column name)
+      const deliveryResult = await client.query(`
+        INSERT INTO deliveries (delivery_no, order_id, delivery_address, delivery_date, status, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+        RETURNING *
+      `, [delivery_no, order_id, delivery_address, schedule_date, status || 'draft']);
+      
+      const deliveryId = deliveryResult.rows[0].id;
+      
+      // Insert delivery lines and stock ledger entries if products exist
+      if (products && products.length > 0) {
+        for (const product of products) {
+          // Insert delivery line
+          await client.query(`
+            INSERT INTO delivery_lines (delivery_id, product_id, quantity, created_at, updated_at)
+            VALUES ($1, $2, $3, NOW(), NOW())
+          `, [deliveryId, product.product_id, product.quantity]);
+          
+          // Get product details for stock ledger
+          const productResult = await client.query(
+            'SELECT sku, uom FROM products WHERE id = $1',
+            [product.product_id]
+          );
+          
+          // Get warehouse location
+          const locationResult = await client.query(
+            "SELECT id FROM locations WHERE code = 'WH/Stock' LIMIT 1"
+          );
+          const fromLocationId = locationResult.rows[0]?.id;
+          
+          // Insert into stock_ledger for move history (negative quantity for delivery)
+          await client.query(`
+            INSERT INTO stock_ledger (
+              occurred_at, event_type, product_id, qty_delta, uom,
+              from_location, to_location, source_type, source_id, created_by
+            )
+            VALUES (NOW(), 'delivery', $1, $2, $3, $4, NULL, 'delivery', $5, NULL)
+          `, [
+            product.product_id,
+            -product.quantity, // Negative for outgoing delivery
+            productResult.rows[0]?.uom || 'Units',
+            fromLocationId,
+            deliveryId
+          ]);
+        }
+      }
+      
+      await client.query('COMMIT');
+      
+      res.status(201).json({
+        success: true,
+        data: deliveryResult.rows[0]
+      });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    console.error('Error creating delivery:', error);
+    res.status(500).json({ success: false, error: 'Failed to create delivery' });
+  }
+});
+
+/**
+ * PUT /api/data/deliveries/:id
+ * Update delivery status
+ */
+router.put('/deliveries/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    
+    const result = await pgPool.query(`
+      UPDATE deliveries
+      SET status = $1, updated_at = NOW()
+      WHERE id = $2
+      RETURNING *
+    `, [status, id]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Delivery not found' });
+    }
+    
+    res.status(200).json({
+      success: true,
+      data: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error updating delivery:', error);
+    res.status(500).json({ success: false, error: 'Failed to update delivery' });
+  }
+});
+
 // ==================== STOCK LEDGER ====================
 
 /**
@@ -339,17 +557,41 @@ router.get('/stock-ledger', authenticateToken, async (req, res) => {
   try {
     const result = await pgPool.query(`
       SELECT 
-        sl.*,
+        sl.id,
+        sl.occurred_at as created_at,
+        sl.tx_id,
+        sl.event_type,
+        sl.product_id,
+        sl.qty_delta,
+        sl.uom,
+        sl.from_location,
+        sl.to_location,
+        sl.source_type,
+        sl.source_id,
+        sl.created_by,
         p.sku as product_sku,
         p.name as product_name,
-        fl.code as from_location_code,
-        tl.code as to_location_code
+        COALESCE(fl.code, 'Vendor') as from_location_code,
+        COALESCE(tl.code, 'N/A') as to_location_code,
+        CASE 
+          WHEN sl.source_type = 'initial_seed' THEN 'Initial Stock'
+          WHEN sl.source_type = 'initial_populate' THEN 'Initial Import'
+          WHEN sl.source_type IS NOT NULL THEN sl.source_type
+          ELSE 'Manual Entry'
+        END as source,
+        COALESCE(sl.created_by::text, 'System') as created_by_username
       FROM stock_ledger sl
       LEFT JOIN products p ON sl.product_id = p.id
       LEFT JOIN locations fl ON sl.from_location = fl.id
       LEFT JOIN locations tl ON sl.to_location = tl.id
-      ORDER BY sl.created_at DESC
-      LIMIT 200
+      WHERE sl.source_type NOT IN ('initial_seed', 'initial_populate')
+         OR sl.id IN (
+           SELECT id FROM stock_ledger 
+           WHERE source_type IN ('initial_seed', 'initial_populate')
+           ORDER BY occurred_at ASC
+           LIMIT 3
+         )
+      ORDER BY sl.occurred_at DESC
     `);
     
     res.status(200).json({
@@ -558,6 +800,201 @@ router.put('/settings/:id', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Error updating setting:', error);
     res.status(500).json({ success: false, error: 'Failed to update setting' });
+  }
+});
+
+// ==================== INTERNAL TRANSFERS ====================
+
+/**
+ * GET /api/data/internal-transfers
+ * Fetch all internal transfers
+ */
+router.get('/internal-transfers', authenticateToken, async (req, res) => {
+  try {
+    const result = await pgPool.query(`
+      SELECT * FROM internal_transfers
+      ORDER BY created_at DESC
+    `);
+    
+    res.status(200).json({
+      success: true,
+      data: result.rows
+    });
+  } catch (error) {
+    console.error('Error fetching internal transfers:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch internal transfers' });
+  }
+});
+
+/**
+ * POST /api/data/internal-transfers
+ * Create a new internal transfer
+ */
+router.post('/internal-transfers', authenticateToken, async (req, res) => {
+  try {
+    const { transfer_no, from_location_id, to_location_id, transfer_date, status, products } = req.body;
+    
+    const client = await pgPool.connect();
+    
+    try {
+      await client.query('BEGIN');
+      
+      // Insert internal transfer
+      const transferResult = await client.query(`
+        INSERT INTO internal_transfers (transfer_no, from_location_id, to_location_id, transfer_date, status, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+        RETURNING *
+      `, [transfer_no, from_location_id, to_location_id, transfer_date, status || 'draft']);
+      
+      const transferId = transferResult.rows[0].id;
+      
+      // Insert transfer lines and stock ledger entries
+      if (products && products.length > 0) {
+        for (const product of products) {
+          // Insert transfer line
+          await client.query(`
+            INSERT INTO transfer_lines (transfer_id, product_id, quantity, created_at, updated_at)
+            VALUES ($1, $2, $3, NOW(), NOW())
+          `, [transferId, product.product_id, product.quantity]);
+          
+          // Get product details
+          const productResult = await client.query(
+            'SELECT sku, uom FROM products WHERE id = $1',
+            [product.product_id]
+          );
+          
+          // Insert into stock_ledger for move history
+          await client.query(`
+            INSERT INTO stock_ledger (
+              occurred_at, event_type, product_id, qty_delta, uom,
+              from_location, to_location, source_type, source_id, created_by
+            )
+            VALUES (NOW(), 'transfer', $1, $2, $3, $4, $5, 'internal_transfer', $6, NULL)
+          `, [
+            product.product_id,
+            product.quantity,
+            productResult.rows[0]?.uom || 'Units',
+            from_location_id,
+            to_location_id,
+            transferId
+          ]);
+        }
+      }
+      
+      await client.query('COMMIT');
+      
+      res.status(201).json({
+        success: true,
+        data: transferResult.rows[0]
+      });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    console.error('Error creating internal transfer:', error);
+    res.status(500).json({ success: false, error: 'Failed to create internal transfer' });
+  }
+});
+
+// ==================== STOCK ADJUSTMENTS ====================
+
+/**
+ * GET /api/data/stock-adjustments
+ * Fetch all stock adjustments
+ */
+router.get('/stock-adjustments', authenticateToken, async (req, res) => {
+  try {
+    const result = await pgPool.query(`
+      SELECT * FROM stock_adjustments
+      ORDER BY created_at DESC
+    `);
+    
+    res.status(200).json({
+      success: true,
+      data: result.rows
+    });
+  } catch (error) {
+    console.error('Error fetching stock adjustments:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch stock adjustments' });
+  }
+});
+
+/**
+ * POST /api/data/stock-adjustments
+ * Create a new stock adjustment
+ */
+router.post('/stock-adjustments', authenticateToken, async (req, res) => {
+  try {
+    const { adjustment_no, location_id, adjustment_date, reason, status, products } = req.body;
+    
+    const client = await pgPool.connect();
+    
+    try {
+      await client.query('BEGIN');
+      
+      // Insert stock adjustment
+      const adjustmentResult = await client.query(`
+        INSERT INTO stock_adjustments (adjustment_no, location_id, adjustment_date, reason, status, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+        RETURNING *
+      `, [adjustment_no, location_id, adjustment_date, reason, status || 'draft']);
+      
+      const adjustmentId = adjustmentResult.rows[0].id;
+      
+      // Insert adjustment lines and stock ledger entries
+      if (products && products.length > 0) {
+        for (const product of products) {
+          const difference = product.counted_qty - product.current_qty;
+          
+          // Insert adjustment line
+          await client.query(`
+            INSERT INTO adjustment_lines (adjustment_id, product_id, counted_qty, difference, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, NOW(), NOW())
+          `, [adjustmentId, product.product_id, product.counted_qty, difference]);
+          
+          // Get product details
+          const productResult = await client.query(
+            'SELECT sku, uom FROM products WHERE id = $1',
+            [product.product_id]
+          );
+          
+          // Insert into stock_ledger for move history (only if there's a difference)
+          if (difference !== 0) {
+            await client.query(`
+              INSERT INTO stock_ledger (
+                occurred_at, event_type, product_id, qty_delta, uom,
+                from_location, to_location, source_type, source_id, created_by
+              )
+              VALUES (NOW(), 'adjustment', $1, $2, $3, NULL, $4, 'stock_adjustment', $5, NULL)
+            `, [
+              product.product_id,
+              difference,
+              productResult.rows[0]?.uom || 'Units',
+              location_id,
+              adjustmentId
+            ]);
+          }
+        }
+      }
+      
+      await client.query('COMMIT');
+      
+      res.status(201).json({
+        success: true,
+        data: adjustmentResult.rows[0]
+      });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    console.error('Error creating stock adjustment:', error);
+    res.status(500).json({ success: false, error: 'Failed to create stock adjustment' });
   }
 });
 

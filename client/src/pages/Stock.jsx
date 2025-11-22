@@ -191,10 +191,10 @@ function Stock() {
               </div>
               <div className="dropdown-divider"></div>
               <button className="dropdown-item" onClick={() => navigate('/settings')}>
-                <span>⚙</span> Settings
+                Settings
               </button>
               <button className="dropdown-item" onClick={handleLogout}>
-                <span>→</span> Logout
+                Logout
               </button>
             </div>
           )}

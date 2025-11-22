@@ -33,6 +33,7 @@ function Delivery() {
     fetchUserData();
     fetchProducts();
     fetchCustomers();
+    fetchDeliveriesAndGenerateDocNo();
   }, []);
 
   useEffect(() => {
@@ -62,7 +63,9 @@ function Delivery() {
   const fetchProducts = async () => {
     try {
       const response = await api.get('/data/products');
-      setAvailableProducts(response.data.map(p => ({
+      console.log('Products API response:', response.data);
+      const productsArray = response.data.success ? response.data.data : response.data;
+      setAvailableProducts(productsArray.map(p => ({
         id: p.id,
         sku: p.sku,
         name: p.name,
@@ -76,9 +79,36 @@ function Delivery() {
   const fetchCustomers = async () => {
     try {
       const response = await api.get('/data/customers');
-      setCustomers(response.data);
+      console.log('Customers API response:', response.data);
+      setCustomers(Array.isArray(response.data) ? response.data : []);
     } catch (err) {
       console.error('Failed to fetch customers:', err);
+    }
+  };
+
+  const fetchDeliveriesAndGenerateDocNo = async () => {
+    try {
+      const response = await api.get('/data/deliveries');
+      const deliveries = response.data.success ? response.data.data : response.data;
+      
+      // Find the highest delivery number
+      let maxNum = 0;
+      deliveries.forEach(delivery => {
+        const match = delivery.delivery_no?.match(/WH\/OUT\/(\d+)/);
+        if (match) {
+          const num = parseInt(match[1]);
+          if (num > maxNum) maxNum = num;
+        }
+      });
+      
+      // Generate next delivery number
+      const nextNum = String(maxNum + 1).padStart(4, '0');
+      const newDocNo = `WH/OUT/${nextNum}`;
+      
+      setDeliveryData(prev => ({ ...prev, documentNo: newDocNo }));
+      console.log('Generated next delivery number:', newDocNo);
+    } catch (err) {
+      console.error('Failed to fetch deliveries:', err);
     }
   };
 
@@ -120,19 +150,73 @@ function Delivery() {
     setDeliveryData(prev => ({ ...prev, status: newStatus.toLowerCase() }));
   };
 
-  const handleValidate = () => {
+  const handleSave = async () => {
+    try {
+      // Find customer ID from delivery address (or use null for now)
+      const payload = {
+        delivery_no: deliveryData.documentNo,
+        order_id: null, // No order for now
+        delivery_address: deliveryData.deliveryAddress,
+        schedule_date: deliveryData.scheduleDate,
+        status: deliveryData.status,
+        products: deliveryData.products.filter(p => p.product_id && p.quantity > 0)
+      };
+      
+      const response = await api.post('/data/deliveries', payload);
+      console.log('Delivery saved:', response.data);
+      alert('Delivery saved successfully!');
+      
+      // After successful save, generate new document number and reset form
+      await fetchDeliveriesAndGenerateDocNo();
+      setDeliveryData(prev => ({
+        ...prev,
+        deliveryAddress: '',
+        scheduleDate: new Date().toISOString().split('T')[0],
+        operationType: 'Delivery',
+        status: 'draft',
+        products: []
+      }));
+      
+      return true;
+    } catch (err) {
+      console.error('Error saving delivery:', err);
+      console.error('Error response:', err.response);
+      alert('Failed to save delivery: ' + (err.response?.data?.error || err.message));
+      return false;
+    }
+  };
+
+  const handleValidate = async () => {
     if (deliveryData.status === 'draft') {
       if (checkStockAvailability()) {
         handleStatusChange('ready');
+        setTimeout(async () => {
+          const success = await handleSave();
+          if (success) console.log('Delivery validated to ready status');
+        }, 100);
       } else {
         handleStatusChange('waiting');
-        alert('Some products are out of stock. Status set to Waiting.');
+        setTimeout(async () => {
+          const success = await handleSave();
+          if (success) {
+            console.log('Delivery set to waiting status');
+            alert('Some products are out of stock. Status set to Waiting.');
+          }
+        }, 100);
       }
     } else if (deliveryData.status === 'ready') {
       handleStatusChange('done');
+      setTimeout(async () => {
+        const success = await handleSave();
+        if (success) console.log('Delivery validated to done status');
+      }, 100);
     } else if (deliveryData.status === 'waiting') {
       if (checkStockAvailability()) {
         handleStatusChange('ready');
+        setTimeout(async () => {
+          const success = await handleSave();
+          if (success) console.log('Delivery validated from waiting to ready');
+        }, 100);
       } else {
         alert('Cannot validate. Products still out of stock!');
       }
@@ -281,16 +365,13 @@ function Delivery() {
                 </div>
                 <div className="dropdown-divider"></div>
                 <button className="dropdown-item" onClick={() => setDropdownOpen(false)}>
-                  <span className="dropdown-icon">⚙</span>
                   Account Settings
                 </button>
                 <button className="dropdown-item" onClick={() => setDropdownOpen(false)}>
-                  <span className="dropdown-icon">👤</span>
                   My Profile
                 </button>
                 <div className="dropdown-divider"></div>
                 <button className="dropdown-item logout-item" onClick={handleLogout}>
-                  <span className="dropdown-icon">→</span>
                   Logout
                 </button>
               </div>
@@ -319,6 +400,14 @@ function Delivery() {
             </span>
           </div>
           <div style={{ display: 'flex', gap: '10px' }}>
+            <button 
+              className="btn-primary" 
+              onClick={handleSave}
+              disabled={deliveryData.status === 'done' || deliveryData.products.length === 0}
+              style={{ backgroundColor: '#007bff', opacity: (deliveryData.status === 'done' || deliveryData.products.length === 0) ? 0.6 : 1 }}
+            >
+              Save
+            </button>
             <button 
               className="btn-primary" 
               onClick={handleNew}

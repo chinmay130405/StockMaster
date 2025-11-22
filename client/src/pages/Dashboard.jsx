@@ -15,7 +15,8 @@ function Dashboard() {
     totalProducts: 0,
     lowStockProducts: 0,
     pendingReceipts: 0,
-    pendingDeliveries: 0
+    pendingDeliveries: 0,
+    pendingTransfers: 0
   });
 
   useEffect(() => {
@@ -29,6 +30,24 @@ function Dashboard() {
     fetchUserData();
     fetchDashboardStats();
   }, []);
+
+  // Refresh stats when tab becomes active or location changes
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        fetchDashboardStats();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    // Also refresh when navigating back to dashboard
+    fetchDashboardStats();
+    
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [location, activeTab]);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -78,6 +97,16 @@ function Dashboard() {
       const receipts = receiptsRes.data.success ? receiptsRes.data.data : receiptsRes.data;
       const deliveries = deliveriesRes.data.success ? deliveriesRes.data.data : deliveriesRes.data;
       
+      // Fetch internal transfers
+      let pendingTransfers = 0;
+      try {
+        const transfersRes = await api.get('/data/internal-transfers');
+        const transfers = transfersRes.data.success ? transfersRes.data.data : transfersRes.data;
+        pendingTransfers = transfers.filter(t => t.status === 'draft' || t.status === 'waiting').length;
+      } catch (err) {
+        console.log('Internal transfers not available yet');
+      }
+      
       // Count pending receipts (draft or ready status)
       const pendingReceipts = receipts.filter(
         r => r.status === 'draft' || r.status === 'ready'
@@ -92,7 +121,8 @@ function Dashboard() {
         totalProducts: products.length,
         lowStockProducts: lowStock,
         pendingReceipts,
-        pendingDeliveries
+        pendingDeliveries,
+        pendingTransfers
       };
       
       console.log('Dashboard stats:', newStats);
@@ -199,19 +229,16 @@ function Dashboard() {
                   setDropdownOpen(false);
                   setActiveTab('Settings');
                 }}>
-                  <span className="dropdown-icon">⚙</span>
                   Account Settings
                 </button>
                 <button className="dropdown-item" onClick={() => {
                   setDropdownOpen(false);
                   // Add profile action here
                 }}>
-                  <span className="dropdown-icon">👤</span>
                   My Profile
                 </button>
                 <div className="dropdown-divider"></div>
                 <button className="dropdown-item logout-item" onClick={handleLogout}>
-                  <span className="dropdown-icon">→</span>
                   Logout
                 </button>
               </div>
@@ -265,7 +292,6 @@ function Dashboard() {
                     onClick={() => navigate('/receipt')}
                   >
                     <span className="btn-text">4 to receive</span>
-                    <span className="btn-icon">→</span>
                   </button>
                 </div>
               </div>
@@ -286,7 +312,6 @@ function Dashboard() {
                     onClick={() => navigate('/delivery')}
                   >
                     <span className="btn-text">4 to Deliver</span>
-                    <span className="btn-icon">→</span>
                   </button>
                 </div>
               </div>
@@ -312,6 +337,10 @@ function Dashboard() {
                   <div className="stat-box">
                     <div className="stat-value">{stats.pendingDeliveries}</div>
                     <div className="stat-label">Pending Deliveries</div>
+                  </div>
+                  <div className="stat-box">
+                    <div className="stat-value">{stats.pendingTransfers}</div>
+                    <div className="stat-label">Internal Transfers Scheduled</div>
                   </div>
                 </div>
               </div>
@@ -364,14 +393,20 @@ function Dashboard() {
             <div className="info-card">
               <h3 className="info-title">Warehouse Operations</h3>
               <p style={{ marginBottom: '20px', color: '#666' }}>
-                Manage your warehouse operations including receipts and deliveries.
+                Manage your warehouse operations including receipts, deliveries, transfers, and adjustments.
               </p>
-              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
                 <button className="btn-primary" onClick={() => navigate('/receipt')}>
                   Receipts
                 </button>
                 <button className="btn-primary" onClick={() => navigate('/delivery')}>
                   Deliveries
+                </button>
+                <button className="btn-primary" onClick={() => navigate('/internal-transfer')}>
+                  Internal Transfers
+                </button>
+                <button className="btn-primary" onClick={() => navigate('/inventory-adjustment')}>
+                  Inventory Adjustment
                 </button>
               </div>
             </div>

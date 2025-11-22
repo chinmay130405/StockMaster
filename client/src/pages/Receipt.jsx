@@ -26,6 +26,7 @@ function Receipt() {
     fetchUserData();
     fetchProducts();
     fetchSuppliers();
+    fetchReceiptsAndGenerateDocNo();
   }, []);
 
   useEffect(() => {
@@ -55,7 +56,9 @@ function Receipt() {
   const fetchProducts = async () => {
     try {
       const response = await api.get('/data/products');
-      setAvailableProducts(response.data.map(p => ({
+      console.log('Products API response:', response.data);
+      const productsArray = response.data.success ? response.data.data : response.data;
+      setAvailableProducts(productsArray.map(p => ({
         id: p.id,
         sku: p.sku,
         name: p.name
@@ -68,9 +71,36 @@ function Receipt() {
   const fetchSuppliers = async () => {
     try {
       const response = await api.get('/data/suppliers');
-      setSuppliers(response.data);
+      console.log('Suppliers API response:', response.data);
+      setSuppliers(Array.isArray(response.data) ? response.data : []);
     } catch (err) {
       console.error('Failed to fetch suppliers:', err);
+    }
+  };
+
+  const fetchReceiptsAndGenerateDocNo = async () => {
+    try {
+      const response = await api.get('/data/receipts');
+      const receipts = response.data.success ? response.data.data : response.data;
+      
+      // Find the highest receipt number
+      let maxNum = 0;
+      receipts.forEach(receipt => {
+        const match = receipt.receipt_no?.match(/WH\/IN\/(\d+)/);
+        if (match) {
+          const num = parseInt(match[1]);
+          if (num > maxNum) maxNum = num;
+        }
+      });
+      
+      // Generate next receipt number
+      const nextNum = String(maxNum + 1).padStart(4, '0');
+      const newDocNo = `WH/IN/${nextNum}`;
+      
+      setReceiptData(prev => ({ ...prev, documentNo: newDocNo }));
+      console.log('Generated next receipt number:', newDocNo);
+    } catch (err) {
+      console.error('Failed to fetch receipts:', err);
     }
   };
 
@@ -102,11 +132,65 @@ function Receipt() {
     setReceiptData(prev => ({ ...prev, status: newStatus.toLowerCase() }));
   };
 
-  const handleValidate = () => {
+  const handleSave = async () => {
+    try {
+      // Find supplier ID from name
+      const supplier = suppliers.find(s => s.name === receiptData.receiveFrom);
+      
+      const payload = {
+        receipt_no: receiptData.documentNo,
+        supplier_id: supplier?.id,
+        schedule_date: receiptData.scheduleDate,
+        status: receiptData.status,
+        products: receiptData.products.filter(p => p.product_id && p.quantity > 0)
+      };
+      
+      const response = await api.post('/data/receipts', payload);
+      console.log('Receipt saved:', response.data);
+      alert('Receipt saved successfully!');
+      
+      // After successful save, generate new document number and reset form
+      await fetchReceiptsAndGenerateDocNo();
+      setReceiptData(prev => ({
+        ...prev,
+        receiveFrom: '',
+        scheduleDate: new Date().toISOString().split('T')[0],
+        status: 'draft',
+        products: []
+      }));
+      
+      return true;
+    } catch (err) {
+      console.error('Error saving receipt:', err);
+      console.error('Error response:', err.response);
+      alert('Failed to save receipt: ' + (err.response?.data?.error || err.message));
+      return false;
+    }
+  };
+
+  const handleValidate = async () => {
+    let newStatus = receiptData.status;
+    
     if (receiptData.status === 'draft') {
+      newStatus = 'ready';
       handleStatusChange('ready');
+      // Wait for state update before saving
+      setTimeout(async () => {
+        const success = await handleSave();
+        if (success) {
+          console.log('Receipt validated to ready status');
+        }
+      }, 100);
     } else if (receiptData.status === 'ready') {
+      newStatus = 'done';
       handleStatusChange('done');
+      // Wait for state update before saving
+      setTimeout(async () => {
+        const success = await handleSave();
+        if (success) {
+          console.log('Receipt validated to done status');
+        }
+      }, 100);
     }
   };
 
@@ -237,16 +321,13 @@ function Receipt() {
                 </div>
                 <div className="dropdown-divider"></div>
                 <button className="dropdown-item" onClick={() => setDropdownOpen(false)}>
-                  <span className="dropdown-icon">⚙</span>
                   Account Settings
                 </button>
                 <button className="dropdown-item" onClick={() => setDropdownOpen(false)}>
-                  <span className="dropdown-icon">👤</span>
                   My Profile
                 </button>
                 <div className="dropdown-divider"></div>
                 <button className="dropdown-item logout-item" onClick={handleLogout}>
-                  <span className="dropdown-icon">→</span>
                   Logout
                 </button>
               </div>
@@ -275,6 +356,14 @@ function Receipt() {
             </span>
           </div>
           <div style={{ display: 'flex', gap: '10px' }}>
+            <button 
+              className="btn-primary" 
+              onClick={handleSave}
+              disabled={receiptData.status === 'done' || receiptData.products.length === 0}
+              style={{ backgroundColor: '#007bff', opacity: (receiptData.status === 'done' || receiptData.products.length === 0) ? 0.6 : 1 }}
+            >
+              Save
+            </button>
             <button 
               className="btn-primary" 
               onClick={handleNew}

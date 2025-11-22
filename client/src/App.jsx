@@ -11,6 +11,8 @@ import Warehouse from './pages/Warehouse';
 import Location from './pages/Location';
 import Receipt from './pages/Receipt';
 import Delivery from './pages/Delivery';
+import InternalTransfer from './pages/InternalTransfer';
+import InventoryAdjustment from './pages/InventoryAdjustment';
 import MoveHistory from './pages/MoveHistory';
 import Settings from './pages/Settings';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -76,6 +78,22 @@ function App() {
           element={
             <ProtectedRoute>
               <Delivery />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/internal-transfer"
+          element={
+            <ProtectedRoute>
+              <InternalTransfer />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/inventory-adjustment"
+          element={
+            <ProtectedRoute>
+              <InventoryAdjustment />
             </ProtectedRoute>
           }
         />

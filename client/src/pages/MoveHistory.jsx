@@ -17,6 +17,21 @@ function MoveHistory() {
     fetchMoveHistory();
   }, []);
 
+  // Refresh move history when tab becomes active
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        fetchMoveHistory();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
+
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
@@ -142,10 +157,10 @@ function MoveHistory() {
               </div>
               <div className="dropdown-divider"></div>
               <button className="dropdown-item" onClick={() => navigate('/settings')}>
-                <span>⚙</span> Settings
+                Settings
               </button>
               <button className="dropdown-item" onClick={handleLogout}>
-                <span>→</span> Logout
+                Logout
               </button>
             </div>
           )}
