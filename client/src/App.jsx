@@ -15,6 +15,7 @@ import InternalTransfer from './pages/InternalTransfer';
 import InventoryAdjustment from './pages/InventoryAdjustment';
 import MoveHistory from './pages/MoveHistory';
 import Settings from './pages/Settings';
+import Profile from './pages/Profile';
 import ProtectedRoute from './components/ProtectedRoute';
 import './index.css';
 
@@ -110,6 +111,14 @@ function App() {
           element={
             <ProtectedRoute>
               <Settings />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/profile"
+          element={
+            <ProtectedRoute>
+              <Profile />
             </ProtectedRoute>
           }
         />

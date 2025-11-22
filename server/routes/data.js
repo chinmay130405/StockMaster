@@ -9,6 +9,65 @@ const { authenticateToken } = require('../middleware/auth');
 
 const router = express.Router();
 
+// ==================== CATEGORIES ====================
+
+/**
+ * GET /api/data/categories
+ * Fetch all product categories
+ */
+router.get('/categories', authenticateToken, async (req, res) => {
+  try {
+    const result = await pgPool.query(`
+      SELECT 
+        pc.*,
+        COUNT(p.id) as product_count
+      FROM product_categories pc
+      LEFT JOIN products p ON pc.id = p.category_id
+      GROUP BY pc.id
+      ORDER BY pc.name
+    `);
+    
+    res.status(200).json({
+      success: true,
+      data: result.rows
+    });
+  } catch (error) {
+    console.error('Error fetching categories:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch categories' });
+  }
+});
+
+/**
+ * POST /api/data/categories
+ * Create a new product category
+ */
+router.post('/categories', authenticateToken, async (req, res) => {
+  try {
+    const { name, description } = req.body;
+    
+    if (!name) {
+      return res.status(400).json({ success: false, error: 'Category name is required' });
+    }
+    
+    const result = await pgPool.query(`
+      INSERT INTO product_categories (name, description, created_at, updated_at)
+      VALUES ($1, $2, NOW(), NOW())
+      RETURNING *
+    `, [name, description || null]);
+    
+    res.status(201).json({
+      success: true,
+      data: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error creating category:', error);
+    if (error.code === '23505') {
+      return res.status(400).json({ success: false, error: 'Category name already exists' });
+    }
+    res.status(500).json({ success: false, error: 'Failed to create category' });
+  }
+});
+
 // ==================== PRODUCTS ====================
 
 /**
@@ -28,6 +87,8 @@ router.get('/products', authenticateToken, async (req, res) => {
         p.default_cost as cost_price,
         p.default_price,
         p.uom,
+        p.min_stock,
+        p.reorder_point,
         COALESCE(SUM(sl.quantity), 0) as on_hand,
         COALESCE(SUM(sl.reserved), 0) as reserved,
         COALESCE(SUM(sl.quantity) - SUM(sl.reserved), 0) as free_to_use,
@@ -47,6 +108,53 @@ router.get('/products', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Error fetching products:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch products' });
+  }
+});
+
+/**
+ * POST /api/data/products
+ * Create a new product
+ */
+router.post('/products', authenticateToken, async (req, res) => {
+  try {
+    const { name, sku, category_id, cost_price, description, uom, min_stock, reorder_point } = req.body;
+    
+    if (!name || !sku || !category_id || !cost_price) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Name, SKU, category, and cost price are required' 
+      });
+    }
+    
+    const result = await pgPool.query(`
+      INSERT INTO products (
+        name, sku, description, category_id, default_cost, default_price, uom, 
+        min_stock, reorder_point, created_at, updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
+      RETURNING *
+    `, [
+      name, 
+      sku, 
+      description || null, 
+      category_id, 
+      cost_price, 
+      cost_price * 1.2, // default selling price (20% markup)
+      uom || 'Unit',
+      min_stock || 0,
+      reorder_point || 0
+    ]);
+    
+    res.status(201).json({
+      success: true,
+      data: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error creating product:', error);
+    if (error.code === '23505') {
+      return res.status(400).json({ success: false, error: 'Product SKU already exists' });
+    }
+    res.status(500).json({ success: false, error: 'Failed to create product' });
   }
 });
 
