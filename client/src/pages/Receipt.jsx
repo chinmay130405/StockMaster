@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { getCurrentUser, removeToken } from '../api';
+import api, { getCurrentUser, removeToken } from '../api';
 
 function Receipt() {
   const navigate = useNavigate();
@@ -10,26 +10,22 @@ function Receipt() {
   const [activeTab, setActiveTab] = useState('Operations');
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef(null);
+  const [availableProducts, setAvailableProducts] = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
   
   const [receiptData, setReceiptData] = useState({
     documentNo: docNo || 'WH/IN/0001',
     receiveFrom: '',
     responsible: '',
     scheduleDate: new Date().toISOString().split('T')[0],
-    status: 'Draft',
-    products: [
-      { id: 1, sku: 'DESK001', product: 'Desk', quantity: 6 }
-    ]
+    status: 'draft',
+    products: []
   });
-
-  const [availableProducts] = useState([
-    { sku: 'DESK001', name: 'Desk' },
-    { sku: 'TABLE001', name: 'Table' },
-    { sku: 'CHAIR001', name: 'Chair' },
-  ]);
 
   useEffect(() => {
     fetchUserData();
+    fetchProducts();
+    fetchSuppliers();
   }, []);
 
   useEffect(() => {
@@ -56,6 +52,28 @@ function Receipt() {
     }
   };
 
+  const fetchProducts = async () => {
+    try {
+      const response = await api.get('/data/products');
+      setAvailableProducts(response.data.map(p => ({
+        id: p.id,
+        sku: p.sku,
+        name: p.name
+      })));
+    } catch (err) {
+      console.error('Failed to fetch products:', err);
+    }
+  };
+
+  const fetchSuppliers = async () => {
+    try {
+      const response = await api.get('/data/suppliers');
+      setSuppliers(response.data);
+    } catch (err) {
+      console.error('Failed to fetch suppliers:', err);
+    }
+  };
+
   const handleLogout = () => {
     removeToken();
     navigate('/login');
@@ -67,23 +85,28 @@ function Receipt() {
   };
 
   const getStatusColor = (status) => {
-    switch (status) {
-      case 'Draft': return '#6c757d';
-      case 'Ready': return '#ffc107';
-      case 'Done': return '#28a745';
+    switch (status?.toLowerCase()) {
+      case 'draft': return '#6c757d';
+      case 'ready': return '#ffc107';
+      case 'done': return '#28a745';
       default: return '#6c757d';
     }
   };
 
+  const getStatusDisplay = (status) => {
+    if (!status) return 'Draft';
+    return status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
+  };
+
   const handleStatusChange = (newStatus) => {
-    setReceiptData(prev => ({ ...prev, status: newStatus }));
+    setReceiptData(prev => ({ ...prev, status: newStatus.toLowerCase() }));
   };
 
   const handleValidate = () => {
-    if (receiptData.status === 'Draft') {
-      handleStatusChange('Ready');
-    } else if (receiptData.status === 'Ready') {
-      handleStatusChange('Done');
+    if (receiptData.status === 'draft') {
+      handleStatusChange('ready');
+    } else if (receiptData.status === 'ready') {
+      handleStatusChange('done');
     }
   };
 
@@ -94,7 +117,7 @@ function Receipt() {
       receiveFrom: '',
       responsible: user.loginId,
       scheduleDate: new Date().toISOString().split('T')[0],
-      status: 'Draft',
+      status: 'draft',
       products: []
     });
   };
@@ -102,7 +125,7 @@ function Receipt() {
   const handleAddProduct = () => {
     setReceiptData(prev => ({
       ...prev,
-      products: [...prev.products, { id: Date.now(), sku: '', product: '', quantity: 0 }]
+      products: [...prev.products, { id: Date.now(), product_id: '', sku: '', product: '', quantity: 0 }]
     }));
   };
 
@@ -111,9 +134,9 @@ function Receipt() {
       ...prev,
       products: prev.products.map(p => {
         if (p.id === id) {
-          if (field === 'sku') {
-            const product = availableProducts.find(ap => ap.sku === value);
-            return { ...p, sku: value, product: product ? product.name : '' };
+          if (field === 'product_id') {
+            const product = availableProducts.find(ap => ap.id === value);
+            return { ...p, product_id: value, sku: product?.sku || '', product: product?.name || '' };
           }
           return { ...p, [field]: value };
         }
@@ -214,7 +237,7 @@ function Receipt() {
                 </div>
                 <div className="dropdown-divider"></div>
                 <button className="dropdown-item" onClick={() => setDropdownOpen(false)}>
-                  <span className="dropdown-icon">⚙️</span>
+                  <span className="dropdown-icon">⚙</span>
                   Account Settings
                 </button>
                 <button className="dropdown-item" onClick={() => setDropdownOpen(false)}>
@@ -223,7 +246,7 @@ function Receipt() {
                 </button>
                 <div className="dropdown-divider"></div>
                 <button className="dropdown-item logout-item" onClick={handleLogout}>
-                  <span className="dropdown-icon">🚪</span>
+                  <span className="dropdown-icon">→</span>
                   Logout
                 </button>
               </div>
@@ -248,25 +271,25 @@ function Receipt() {
                 fontWeight: 'bold'
               }}
             >
-              {receiptData.status}
+              {getStatusDisplay(receiptData.status)}
             </span>
           </div>
           <div style={{ display: 'flex', gap: '10px' }}>
             <button 
               className="btn-primary" 
               onClick={handleNew}
-              disabled={receiptData.status !== 'Done'}
-              style={{ opacity: receiptData.status !== 'Done' ? 0.6 : 1 }}
+              disabled={receiptData.status !== 'done'}
+              style={{ opacity: receiptData.status !== 'done' ? 0.6 : 1 }}
             >
               New
             </button>
             <button 
               className="btn-primary" 
               onClick={handleValidate}
-              disabled={receiptData.status === 'Done'}
-              style={{ backgroundColor: '#28a745', opacity: receiptData.status === 'Done' ? 0.6 : 1 }}
+              disabled={receiptData.status === 'done'}
+              style={{ backgroundColor: '#28a745', opacity: receiptData.status === 'done' ? 0.6 : 1 }}
             >
-              {receiptData.status === 'Draft' ? 'Mark Ready' : 'Validate'}
+              {receiptData.status === 'draft' ? 'Mark Ready' : 'Validate'}
             </button>
             <button className="btn-primary" onClick={handlePrint} style={{ backgroundColor: '#17a2b8' }}>
               Print
@@ -300,20 +323,23 @@ function Receipt() {
                   type="date"
                   value={receiptData.scheduleDate}
                   onChange={(e) => setReceiptData(prev => ({ ...prev, scheduleDate: e.target.value }))}
-                  disabled={receiptData.status === 'Done'}
+                  disabled={receiptData.status === 'done'}
                   style={{ width: '100%', padding: '8px 12px', border: '1px solid #ddd', borderRadius: '4px' }}
                 />
               </div>
               <div>
                 <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>Receive From</label>
-                <input
-                  type="text"
+                <select
                   value={receiptData.receiveFrom}
                   onChange={(e) => setReceiptData(prev => ({ ...prev, receiveFrom: e.target.value }))}
-                  placeholder="Enter supplier/source"
-                  disabled={receiptData.status === 'Done'}
+                  disabled={receiptData.status === 'done'}
                   style={{ width: '100%', padding: '8px 12px', border: '1px solid #ddd', borderRadius: '4px' }}
-                />
+                >
+                  <option value="">Select Supplier</option>
+                  {suppliers.map(s => (
+                    <option key={s.id} value={s.name}>{s.name}</option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>Responsible</label>
@@ -342,14 +368,14 @@ function Receipt() {
                     <tr key={product.id} style={{ borderBottom: '1px solid #ddd' }}>
                       <td style={{ padding: '12px' }}>
                         <select
-                          value={product.sku}
-                          onChange={(e) => handleProductChange(product.id, 'sku', e.target.value)}
-                          disabled={receiptData.status === 'Done'}
+                          value={product.product_id || ''}
+                          onChange={(e) => handleProductChange(product.id, 'product_id', e.target.value)}
+                          disabled={receiptData.status === 'done'}
                           style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '4px' }}
                         >
                           <option value="">Select Product</option>
                           {availableProducts.map(p => (
-                            <option key={p.sku} value={p.sku}>[{p.sku}] {p.name}</option>
+                            <option key={p.id} value={p.id}>[{p.sku}] {p.name}</option>
                           ))}
                         </select>
                       </td>
@@ -358,7 +384,7 @@ function Receipt() {
                           type="number"
                           value={product.quantity}
                           onChange={(e) => handleProductChange(product.id, 'quantity', parseInt(e.target.value) || 0)}
-                          disabled={receiptData.status === 'Done'}
+                          disabled={receiptData.status === 'done'}
                           min="0"
                           style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '4px', textAlign: 'right' }}
                         />
@@ -366,15 +392,15 @@ function Receipt() {
                       <td style={{ padding: '12px', textAlign: 'center' }}>
                         <button
                           onClick={() => handleRemoveProduct(product.id)}
-                          disabled={receiptData.status === 'Done'}
-                          style={{ padding: '6px 12px', backgroundColor: '#dc3545', color: 'white', border: 'none', borderRadius: '4px', cursor: receiptData.status === 'Done' ? 'not-allowed' : 'pointer', opacity: receiptData.status === 'Done' ? 0.6 : 1 }}
+                          disabled={receiptData.status === 'done'}
+                          style={{ padding: '6px 12px', backgroundColor: '#dc3545', color: 'white', border: 'none', borderRadius: '4px', cursor: receiptData.status === 'done' ? 'not-allowed' : 'pointer', opacity: receiptData.status === 'done' ? 0.6 : 1 }}
                         >
                           Remove
                         </button>
                       </td>
                     </tr>
                   ))}
-                  {receiptData.status !== 'Done' && (
+                  {receiptData.status !== 'done' && (
                     <tr>
                       <td colSpan="3" style={{ padding: '12px', textAlign: 'center' }}>
                         <button

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { getCurrentUser, removeToken } from '../api';
+import api, { getCurrentUser, removeToken } from '../api';
 
 function Location() {
   const navigate = useNavigate();
@@ -10,26 +10,22 @@ function Location() {
   const [activeTab, setActiveTab] = useState('Products');
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef(null);
-  const [locations, setLocations] = useState([
-    { id: 1, name: 'Shelf A1', shortCode: 'SA1', warehouse: 'WH' },
-    { id: 2, name: 'Shelf A2', shortCode: 'SA2', warehouse: 'WH' },
-    { id: 3, name: 'Room B', shortCode: 'RB', warehouse: 'WH2' },
-  ]);
-  const [warehouses] = useState([
-    { code: 'WH', name: 'Main Warehouse' },
-    { code: 'WH2', name: 'Secondary Warehouse' },
-  ]);
+  const [locations, setLocations] = useState([]);
+  const [warehouses, setWarehouses] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [formData, setFormData] = useState({
     name: '',
-    shortCode: '',
-    warehouse: ''
+    code: '',
+    warehouse_id: ''
   });
   const [filterWarehouse, setFilterWarehouse] = useState(location.state?.warehouseCode || 'ALL');
+  const [error, setError] = useState('');
 
   useEffect(() => {
     fetchUserData();
+    fetchWarehouses();
+    fetchLocations();
   }, []);
 
   useEffect(() => {
@@ -55,6 +51,30 @@ function Location() {
     }
   };
 
+  const fetchWarehouses = async () => {
+    try {
+      const response = await api.get('/data/warehouses');
+      if (response.data.success) {
+        setWarehouses(response.data.data);
+      }
+    } catch (err) {
+      console.error('Error fetching warehouses:', err);
+      setError('Failed to load warehouses');
+    }
+  };
+
+  const fetchLocations = async () => {
+    try {
+      const response = await api.get('/data/locations');
+      if (response.data.success) {
+        setLocations(response.data.data);
+      }
+    } catch (err) {
+      console.error('Error fetching locations:', err);
+      setError('Failed to load locations');
+    }
+  };
+
   const handleLogout = () => {
     removeToken();
     navigate('/login');
@@ -66,42 +86,67 @@ function Location() {
   };
 
   const handleNewLocation = () => {
-    setFormData({ name: '', shortCode: '', warehouse: filterWarehouse !== 'ALL' ? filterWarehouse : '' });
+    const warehouseId = filterWarehouse !== 'ALL' ? warehouses.find(w => w.code === filterWarehouse)?.id : '';
+    setFormData({ name: '', code: '', warehouse_id: warehouseId });
     setEditingId(null);
     setShowForm(true);
   };
 
-  const handleEdit = (location) => {
-    setFormData(location);
-    setEditingId(location.id);
+  const handleEdit = (loc) => {
+    setFormData({
+      name: loc.name,
+      code: loc.code,
+      warehouse_id: loc.warehouse_id
+    });
+    setEditingId(loc.id);
     setShowForm(true);
   };
 
-  const handleSave = () => {
-    if (editingId) {
-      setLocations(locations.map(l => l.id === editingId ? { ...formData, id: editingId } : l));
-    } else {
-      setLocations([...locations, { ...formData, id: Date.now() }]);
+  const handleSave = async () => {
+    try {
+      if (editingId) {
+        const response = await api.put(`/data/locations/${editingId}`, formData);
+        if (response.data.success) {
+          await fetchLocations();
+        }
+      } else {
+        const response = await api.post('/data/locations', formData);
+        if (response.data.success) {
+          await fetchLocations();
+        }
+      }
+      setShowForm(false);
+      setFormData({ name: '', code: '', warehouse_id: '' });
+      setEditingId(null);
+    } catch (err) {
+      console.error('Error saving location:', err);
+      setError('Failed to save location');
     }
-    setShowForm(false);
-    setFormData({ name: '', shortCode: '', warehouse: '' });
   };
 
   const handleCancel = () => {
     setShowForm(false);
-    setFormData({ name: '', shortCode: '', warehouse: '' });
+    setFormData({ name: '', code: '', warehouse_id: '' });
     setEditingId(null);
   };
 
-  const handleDelete = (id) => {
+  const handleDelete = async (id) => {
     if (window.confirm('Are you sure you want to delete this location?')) {
-      setLocations(locations.filter(l => l.id !== id));
+      try {
+        const response = await api.delete(`/data/locations/${id}`);
+        if (response.data.success) {
+          await fetchLocations();
+        }
+      } catch (err) {
+        console.error('Error deleting location:', err);
+        setError('Failed to delete location');
+      }
     }
   };
 
   const filteredLocations = filterWarehouse === 'ALL' 
     ? locations 
-    : locations.filter(l => l.warehouse === filterWarehouse);
+    : locations.filter(l => l.warehouse_code === filterWarehouse);
 
   if (loading) {
     return (
@@ -178,7 +223,7 @@ function Location() {
                 </div>
                 <div className="dropdown-divider"></div>
                 <button className="dropdown-item" onClick={() => setDropdownOpen(false)}>
-                  <span className="dropdown-icon">⚙️</span>
+                  <span className="dropdown-icon">⚙</span>
                   Account Settings
                 </button>
                 <button className="dropdown-item" onClick={() => setDropdownOpen(false)}>
@@ -187,7 +232,7 @@ function Location() {
                 </button>
                 <div className="dropdown-divider"></div>
                 <button className="dropdown-item logout-item" onClick={handleLogout}>
-                  <span className="dropdown-icon">🚪</span>
+                  <span className="dropdown-icon">→</span>
                   Logout
                 </button>
               </div>
@@ -243,8 +288,8 @@ function Location() {
                   <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>Short Code *</label>
                   <input
                     type="text"
-                    value={formData.shortCode}
-                    onChange={(e) => setFormData({ ...formData, shortCode: e.target.value.toUpperCase() })}
+                    value={formData.code}
+                    onChange={(e) => setFormData({ ...formData, code: e.target.value.toUpperCase() })}
                     placeholder="e.g., SA1, RB, SC"
                     style={{ width: '100%', padding: '8px 12px', border: '1px solid #ddd', borderRadius: '4px' }}
                   />
@@ -252,13 +297,13 @@ function Location() {
                 <div>
                   <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>Warehouse *</label>
                   <select
-                    value={formData.warehouse}
-                    onChange={(e) => setFormData({ ...formData, warehouse: e.target.value })}
+                    value={formData.warehouse_id}
+                    onChange={(e) => setFormData({ ...formData, warehouse_id: e.target.value })}
                     style={{ width: '100%', padding: '8px 12px', border: '1px solid #ddd', borderRadius: '4px' }}
                   >
                     <option value="">Select Warehouse</option>
                     {warehouses.map(w => (
-                      <option key={w.code} value={w.code}>{w.code} - {w.name}</option>
+                      <option key={w.id} value={w.id}>{w.code} - {w.name}</option>
                     ))}
                   </select>
                 </div>
@@ -266,8 +311,8 @@ function Location() {
               <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
                 <button 
                   onClick={handleSave}
-                  disabled={!formData.name || !formData.shortCode || !formData.warehouse}
-                  style={{ padding: '8px 16px', backgroundColor: '#28a745', color: 'white', border: 'none', borderRadius: '4px', cursor: formData.name && formData.shortCode && formData.warehouse ? 'pointer' : 'not-allowed' }}
+                  disabled={!formData.name || !formData.code || !formData.warehouse_id}
+                  style={{ padding: '8px 16px', backgroundColor: '#28a745', color: 'white', border: 'none', borderRadius: '4px', cursor: formData.name && formData.code && formData.warehouse_id ? 'pointer' : 'not-allowed' }}
                 >
                   Save
                 </button>
@@ -302,12 +347,12 @@ function Location() {
                         <td style={{ padding: '12px' }}>{loc.name}</td>
                         <td style={{ padding: '12px' }}>
                           <span style={{ padding: '4px 8px', backgroundColor: '#007bff', color: 'white', borderRadius: '4px', fontSize: '12px', fontWeight: 'bold' }}>
-                            {loc.shortCode}
+                            {loc.code}
                           </span>
                         </td>
                         <td style={{ padding: '12px' }}>
                           <span style={{ padding: '4px 8px', backgroundColor: '#28a745', color: 'white', borderRadius: '4px', fontSize: '12px', fontWeight: 'bold' }}>
-                            {loc.warehouse}
+                            {loc.warehouse_code}
                           </span>
                         </td>
                         <td style={{ padding: '12px', textAlign: 'center' }}>

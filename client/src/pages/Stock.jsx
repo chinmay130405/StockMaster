@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getCurrentUser, removeToken } from '../api';
+import api, { getCurrentUser, removeToken } from '../api';
 
 function Stock() {
   const navigate = useNavigate();
@@ -9,16 +9,15 @@ function Stock() {
   const [activeTab, setActiveTab] = useState('Products');
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef(null);
-  const [stockData, setStockData] = useState([
-    { id: 1, product: 'Desk', sku: 'DESK001', perUnitCost: 1000, onHand: 50, freeToUse: 45 },
-    { id: 2, product: 'Table', sku: 'TABLE001', perUnitCost: 3000, onHand: 50, freeToUse: 50 },
-  ]);
+  const [stockData, setStockData] = useState([]);
   const [editingId, setEditingId] = useState(null);
   const [editingField, setEditingField] = useState(null);
   const [editValue, setEditValue] = useState('');
+  const [error, setError] = useState('');
 
   useEffect(() => {
     fetchUserData();
+    fetchStockData();
   }, []);
 
   useEffect(() => {
@@ -41,6 +40,40 @@ function Stock() {
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchStockData = async () => {
+    try {
+      console.log('Fetching stock data from /data/products...');
+      const response = await api.get('/data/products');
+      console.log('Products API response:', response.data);
+      console.log('Response status:', response.status);
+      
+      // Handle both response formats
+      const productsArray = response.data.success ? response.data.data : response.data;
+      console.log('Products array:', productsArray);
+      
+      if (!Array.isArray(productsArray)) {
+        console.error('Products data is not an array:', productsArray);
+        setError('Invalid data format received');
+        return;
+      }
+      
+      const products = productsArray.map(item => ({
+        id: item.id,
+        product: item.name,
+        sku: item.sku,
+        perUnitCost: parseFloat(item.cost_price) || 0,
+        onHand: parseFloat(item.on_hand) || 0,
+        freeToUse: parseFloat(item.free_to_use) || 0,
+      }));
+      console.log('Mapped products:', products);
+      setStockData(products);
+    } catch (err) {
+      console.error('Error fetching stock data:', err);
+      console.error('Error response:', err.response);
+      setError(err.response?.data?.error || 'Failed to load stock data');
     }
   };
 
@@ -100,7 +133,7 @@ function Stock() {
     );
   }
 
-  const tabs = ['Dashboard', 'Operations', 'Products', 'Move History', 'Database', 'Settings'];
+  const tabs = ['Dashboard', 'Operations', 'Products', 'Move History', 'Settings'];
 
   const handleTabClick = (tab) => {
     setActiveTab(tab);
@@ -108,11 +141,17 @@ function Stock() {
       case 'Dashboard':
         navigate('/dashboard');
         break;
+      case 'Operations':
+        navigate('/dashboard', { state: { tab: 'Operations' } });
+        break;
       case 'Products':
         navigate('/stock');
         break;
-      case 'Database':
-        navigate('/data');
+      case 'Move History':
+        navigate('/move-history');
+        break;
+      case 'Settings':
+        navigate('/settings');
         break;
       default:
         break;
@@ -123,8 +162,8 @@ function Stock() {
     <div className="inventory-layout">
       {/* Top Navigation Bar */}
       <nav className="top-nav">
-        <div className="nav-left">
-          {tabs.map((tab) => (
+        <div className="nav-tabs">
+          {tabs.map(tab => (
             <button
               key={tab}
               className={`nav-tab ${activeTab === tab ? 'active' : ''}`}
@@ -134,40 +173,31 @@ function Stock() {
             </button>
           ))}
         </div>
-        <div className="nav-right">
-          <div className="user-menu" ref={dropdownRef}>
-            <button 
-              className="user-avatar" 
-              onClick={() => setDropdownOpen(!dropdownOpen)}
-              title={user.loginId}
-            >
-              {getInitials(user.loginId)}
-            </button>
-            {dropdownOpen && (
-              <div className="dropdown-menu">
-                <div className="dropdown-header">
-                  <div className="dropdown-user-info">
-                    <div className="dropdown-name">{user.loginId}</div>
-                    <div className="dropdown-email">{user.email}</div>
-                  </div>
-                </div>
-                <div className="dropdown-divider"></div>
-                <button className="dropdown-item" onClick={() => setDropdownOpen(false)}>
-                  <span className="dropdown-icon">⚙️</span>
-                  Account Settings
-                </button>
-                <button className="dropdown-item" onClick={() => setDropdownOpen(false)}>
-                  <span className="dropdown-icon">👤</span>
-                  My Profile
-                </button>
-                <div className="dropdown-divider"></div>
-                <button className="dropdown-item logout-item" onClick={handleLogout}>
-                  <span className="dropdown-icon">🚪</span>
-                  Logout
-                </button>
+
+        <div className="user-menu" ref={dropdownRef}>
+          <button 
+            className="user-avatar"
+            onClick={() => setDropdownOpen(!dropdownOpen)}
+            title={user?.loginId}
+          >
+            {getInitials(user?.loginId)}
+          </button>
+          
+          {dropdownOpen && (
+            <div className="dropdown-menu">
+              <div className="dropdown-header">
+                <div className="dropdown-user-name">{user?.loginId}</div>
+                <div className="dropdown-user-email">{user?.email}</div>
               </div>
-            )}
-          </div>
+              <div className="dropdown-divider"></div>
+              <button className="dropdown-item" onClick={() => navigate('/settings')}>
+                <span>⚙</span> Settings
+              </button>
+              <button className="dropdown-item" onClick={handleLogout}>
+                <span>→</span> Logout
+              </button>
+            </div>
+          )}
         </div>
       </nav>
 

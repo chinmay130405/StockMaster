@@ -6,12 +6,13 @@ import ForgotPassword from './pages/ForgotPassword';
 import VerifyOTP from './pages/VerifyOTP';
 import ResetPassword from './pages/ResetPassword';
 import Dashboard from './pages/Dashboard';
-import DataViewer from './pages/DataViewer';
 import Stock from './pages/Stock';
 import Warehouse from './pages/Warehouse';
 import Location from './pages/Location';
 import Receipt from './pages/Receipt';
 import Delivery from './pages/Delivery';
+import MoveHistory from './pages/MoveHistory';
+import Settings from './pages/Settings';
 import ProtectedRoute from './components/ProtectedRoute';
 import './index.css';
 
@@ -35,14 +36,6 @@ function App() {
           element={
             <ProtectedRoute>
               <Dashboard />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/data"
-          element={
-            <ProtectedRoute>
-              <DataViewer />
             </ProtectedRoute>
           }
         />
@@ -83,6 +76,22 @@ function App() {
           element={
             <ProtectedRoute>
               <Delivery />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/move-history"
+          element={
+            <ProtectedRoute>
+              <MoveHistory />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/settings"
+          element={
+            <ProtectedRoute>
+              <Settings />
             </ProtectedRoute>
           }
         />

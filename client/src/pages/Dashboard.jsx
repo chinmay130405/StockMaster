@@ -1,18 +1,33 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { getCurrentUser, removeToken } from '../api';
+import { useNavigate, useLocation } from 'react-router-dom';
+import api, { getCurrentUser, removeToken } from '../api';
 
 function Dashboard() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState('Dashboard');
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef(null);
+  const [stats, setStats] = useState({
+    totalProducts: 0,
+    lowStockProducts: 0,
+    pendingReceipts: 0,
+    pendingDeliveries: 0
+  });
+
+  useEffect(() => {
+    // Check if we should show Operations tab based on navigation state
+    if (location.state?.tab === 'Operations') {
+      setActiveTab('Operations');
+    }
+  }, [location]);
 
   useEffect(() => {
     fetchUserData();
+    fetchDashboardStats();
   }, []);
 
   useEffect(() => {
@@ -37,6 +52,54 @@ function Dashboard() {
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchDashboardStats = async () => {
+    try {
+      console.log('Fetching dashboard stats...');
+      
+      // Fetch products
+      const productsRes = await api.get('/data/products');
+      console.log('Products response:', productsRes.data);
+      const products = productsRes.data.success ? productsRes.data.data : productsRes.data;
+      console.log('Products count:', products.length);
+      
+      // Count low stock products (free_to_use < 10)
+      const lowStock = products.filter(p => (p.free_to_use || 0) < 10).length;
+      
+      // Fetch receipts and deliveries
+      const receiptsRes = await api.get('/data/receipts');
+      const deliveriesRes = await api.get('/data/deliveries');
+      
+      console.log('Receipts response:', receiptsRes.data);
+      console.log('Deliveries response:', deliveriesRes.data);
+      
+      const receipts = receiptsRes.data.success ? receiptsRes.data.data : receiptsRes.data;
+      const deliveries = deliveriesRes.data.success ? deliveriesRes.data.data : deliveriesRes.data;
+      
+      // Count pending receipts (draft or ready status)
+      const pendingReceipts = receipts.filter(
+        r => r.status === 'draft' || r.status === 'ready'
+      ).length;
+      
+      // Count pending deliveries (draft, waiting, or ready status)
+      const pendingDeliveries = deliveries.filter(
+        d => d.status === 'draft' || d.status === 'waiting' || d.status === 'ready'
+      ).length;
+      
+      const newStats = {
+        totalProducts: products.length,
+        lowStockProducts: lowStock,
+        pendingReceipts,
+        pendingDeliveries
+      };
+      
+      console.log('Dashboard stats:', newStats);
+      setStats(newStats);
+    } catch (err) {
+      console.error('Failed to fetch dashboard stats:', err);
+      console.error('Error response:', err.response);
     }
   };
 
@@ -74,21 +137,26 @@ function Dashboard() {
     );
   }
 
-  const tabs = ['Dashboard', 'Operations', 'Products', 'Move History', 'Database', 'Settings'];
+  const tabs = ['Dashboard', 'Operations', 'Products', 'Move History', 'Settings'];
 
   const handleTabClick = (tab) => {
     setActiveTab(tab);
     switch(tab) {
       case 'Dashboard':
-        navigate('/dashboard');
+        // Stay on dashboard page
+        break;
+      case 'Operations':
+        // Stay on dashboard but show operations
         break;
       case 'Products':
         navigate('/stock');
         break;
-      case 'Database':
-        navigate('/data');
+      case 'Move History':
+        navigate('/move-history');
         break;
-      // Operations and other tabs stay on dashboard
+      case 'Settings':
+        navigate('/settings');
+        break;
       default:
         break;
     }
@@ -131,7 +199,7 @@ function Dashboard() {
                   setDropdownOpen(false);
                   setActiveTab('Settings');
                 }}>
-                  <span className="dropdown-icon">⚙️</span>
+                  <span className="dropdown-icon">⚙</span>
                   Account Settings
                 </button>
                 <button className="dropdown-item" onClick={() => {
@@ -143,7 +211,7 @@ function Dashboard() {
                 </button>
                 <div className="dropdown-divider"></div>
                 <button className="dropdown-item logout-item" onClick={handleLogout}>
-                  <span className="dropdown-icon">🚪</span>
+                  <span className="dropdown-icon">→</span>
                   Logout
                 </button>
               </div>
@@ -230,29 +298,88 @@ function Dashboard() {
                 <h3 className="info-title">Quick Stats</h3>
                 <div className="stats-grid">
                   <div className="stat-box">
-                    <div className="stat-value">0</div>
+                    <div className="stat-value">{stats.totalProducts}</div>
                     <div className="stat-label">Products in Stock</div>
                   </div>
                   <div className="stat-box">
-                    <div className="stat-value">0</div>
+                    <div className="stat-value">{stats.lowStockProducts}</div>
                     <div className="stat-label">Low Stock Items</div>
                   </div>
                   <div className="stat-box">
-                    <div className="stat-value">4</div>
+                    <div className="stat-value">{stats.pendingReceipts}</div>
                     <div className="stat-label">Pending Receipts</div>
                   </div>
                   <div className="stat-box">
-                    <div className="stat-value">4</div>
+                    <div className="stat-value">{stats.pendingDeliveries}</div>
                     <div className="stat-label">Pending Deliveries</div>
                   </div>
+                </div>
+              </div>
+
+              {/* Quick Links */}
+              <div className="info-card" style={{ marginTop: '20px' }}>
+                <h3 className="info-title">Quick Links</h3>
+                <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginTop: '16px' }}>
+                  <button className="btn-secondary" onClick={() => navigate('/warehouse')}>
+                    Warehouses
+                  </button>
+                  <button className="btn-secondary" onClick={() => navigate('/location')}>
+                    Locations
+                  </button>
+                  <button className="btn-secondary" onClick={() => navigate('/stock')}>
+                    Stock Inventory
+                  </button>
                 </div>
               </div>
             </div>
           </>
         )}
 
+        {/* Products Tab */}
+        {activeTab === 'Products' && (
+          <div className="info-section">
+            <div className="info-card">
+              <h3 className="info-title">Product Management</h3>
+              <p style={{ marginBottom: '20px', color: '#666' }}>
+                Manage your product catalog, warehouses, and locations.
+              </p>
+              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                <button className="btn-primary" onClick={() => navigate('/stock')}>
+                  Stock Inventory
+                </button>
+                <button className="btn-primary" onClick={() => navigate('/warehouse')}>
+                  Warehouses
+                </button>
+                <button className="btn-primary" onClick={() => navigate('/location')}>
+                  Locations
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Operations Tab */}
+        {activeTab === 'Operations' && (
+          <div className="info-section">
+            <div className="info-card">
+              <h3 className="info-title">Warehouse Operations</h3>
+              <p style={{ marginBottom: '20px', color: '#666' }}>
+                Manage your warehouse operations including receipts and deliveries.
+              </p>
+              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                <button className="btn-primary" onClick={() => navigate('/receipt')}>
+                  Receipts
+                </button>
+                <button className="btn-primary" onClick={() => navigate('/delivery')}>
+                  Deliveries
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Other tabs - placeholder */}
-        {activeTab !== 'Dashboard' && activeTab !== 'Database' && (
+        {activeTab !== 'Dashboard' && activeTab !== 'Database' && activeTab !== 'Products' && activeTab !== 'Operations' && (
           <div className="info-section">
             <div className="info-card">
               <h3 className="info-title">{activeTab}</h3>

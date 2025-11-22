@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { getCurrentUser, removeToken } from '../api';
+import api, { getCurrentUser, removeToken } from '../api';
 
 function Delivery() {
   const navigate = useNavigate();
@@ -10,6 +10,8 @@ function Delivery() {
   const [activeTab, setActiveTab] = useState('Operations');
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef(null);
+  const [availableProducts, setAvailableProducts] = useState([]);
+  const [customers, setCustomers] = useState([]);
   
   const [deliveryData, setDeliveryData] = useState({
     documentNo: docNo || 'WH/OUT/0001',
@@ -17,17 +19,9 @@ function Delivery() {
     responsible: '',
     scheduleDate: new Date().toISOString().split('T')[0],
     operationType: 'Delivery',
-    status: 'Draft',
-    products: [
-      { id: 1, sku: 'DESK001', product: 'Desk', quantity: 6, available: 50, outOfStock: false }
-    ]
+    status: 'draft',
+    products: []
   });
-
-  const [availableProducts] = useState([
-    { sku: 'DESK001', name: 'Desk', stock: 50 },
-    { sku: 'TABLE001', name: 'Table', stock: 50 },
-    { sku: 'CHAIR001', name: 'Chair', stock: 0 },
-  ]);
 
   const [operationTypes] = useState([
     'Delivery',
@@ -37,6 +31,8 @@ function Delivery() {
 
   useEffect(() => {
     fetchUserData();
+    fetchProducts();
+    fetchCustomers();
   }, []);
 
   useEffect(() => {
@@ -63,6 +59,29 @@ function Delivery() {
     }
   };
 
+  const fetchProducts = async () => {
+    try {
+      const response = await api.get('/data/products');
+      setAvailableProducts(response.data.map(p => ({
+        id: p.id,
+        sku: p.sku,
+        name: p.name,
+        stock: p.free_to_use || 0
+      })));
+    } catch (err) {
+      console.error('Failed to fetch products:', err);
+    }
+  };
+
+  const fetchCustomers = async () => {
+    try {
+      const response = await api.get('/data/customers');
+      setCustomers(response.data);
+    } catch (err) {
+      console.error('Failed to fetch customers:', err);
+    }
+  };
+
   const handleLogout = () => {
     removeToken();
     navigate('/login');
@@ -74,13 +93,18 @@ function Delivery() {
   };
 
   const getStatusColor = (status) => {
-    switch (status) {
-      case 'Draft': return '#6c757d';
-      case 'Waiting': return '#dc3545';
-      case 'Ready': return '#ffc107';
-      case 'Done': return '#28a745';
+    switch (status?.toLowerCase()) {
+      case 'draft': return '#6c757d';
+      case 'waiting': return '#dc3545';
+      case 'ready': return '#ffc107';
+      case 'done': return '#28a745';
       default: return '#6c757d';
     }
+  };
+
+  const getStatusDisplay = (status) => {
+    if (!status) return 'draft';
+    return status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
   };
 
   const checkStockAvailability = () => {
@@ -89,26 +113,26 @@ function Delivery() {
   };
 
   const handleStatusChange = (newStatus) => {
-    if (newStatus === 'Ready' && !checkStockAvailability()) {
+    if (newStatus === 'ready' && !checkStockAvailability()) {
       alert('Cannot mark as Ready. Some products are out of stock!');
       return;
     }
-    setDeliveryData(prev => ({ ...prev, status: newStatus }));
+    setDeliveryData(prev => ({ ...prev, status: newStatus.toLowerCase() }));
   };
 
   const handleValidate = () => {
-    if (deliveryData.status === 'Draft') {
+    if (deliveryData.status === 'draft') {
       if (checkStockAvailability()) {
-        handleStatusChange('Ready');
+        handleStatusChange('ready');
       } else {
-        handleStatusChange('Waiting');
+        handleStatusChange('waiting');
         alert('Some products are out of stock. Status set to Waiting.');
       }
-    } else if (deliveryData.status === 'Ready') {
-      handleStatusChange('Done');
-    } else if (deliveryData.status === 'Waiting') {
+    } else if (deliveryData.status === 'ready') {
+      handleStatusChange('done');
+    } else if (deliveryData.status === 'waiting') {
       if (checkStockAvailability()) {
-        handleStatusChange('Ready');
+        handleStatusChange('ready');
       } else {
         alert('Cannot validate. Products still out of stock!');
       }
@@ -123,7 +147,7 @@ function Delivery() {
       responsible: user.loginId,
       scheduleDate: new Date().toISOString().split('T')[0],
       operationType: 'Delivery',
-      status: 'Draft',
+      status: 'draft',
       products: []
     });
   };
@@ -131,7 +155,7 @@ function Delivery() {
   const handleAddProduct = () => {
     setDeliveryData(prev => ({
       ...prev,
-      products: [...prev.products, { id: Date.now(), sku: '', product: '', quantity: 0, available: 0, outOfStock: false }]
+      products: [...prev.products, { id: Date.now(), product_id: '', sku: '', product: '', quantity: 0, available: 0, outOfStock: false }]
     }));
   };
 
@@ -140,13 +164,14 @@ function Delivery() {
       ...prev,
       products: prev.products.map(p => {
         if (p.id === id) {
-          if (field === 'sku') {
-            const product = availableProducts.find(ap => ap.sku === value);
+          if (field === 'product_id') {
+            const product = availableProducts.find(ap => ap.id === value);
             return { 
               ...p, 
-              sku: value, 
-              product: product ? product.name : '',
-              available: product ? product.stock : 0,
+              product_id: value,
+              sku: product?.sku || '', 
+              product: product?.name || '',
+              available: product?.stock || 0,
               outOfStock: product ? product.stock === 0 : false
             };
           } else if (field === 'quantity') {
@@ -256,7 +281,7 @@ function Delivery() {
                 </div>
                 <div className="dropdown-divider"></div>
                 <button className="dropdown-item" onClick={() => setDropdownOpen(false)}>
-                  <span className="dropdown-icon">⚙️</span>
+                  <span className="dropdown-icon">⚙</span>
                   Account Settings
                 </button>
                 <button className="dropdown-item" onClick={() => setDropdownOpen(false)}>
@@ -265,7 +290,7 @@ function Delivery() {
                 </button>
                 <div className="dropdown-divider"></div>
                 <button className="dropdown-item logout-item" onClick={handleLogout}>
-                  <span className="dropdown-icon">🚪</span>
+                  <span className="dropdown-icon">→</span>
                   Logout
                 </button>
               </div>
@@ -290,25 +315,25 @@ function Delivery() {
                 fontWeight: 'bold'
               }}
             >
-              {deliveryData.status}
+              {getStatusDisplay(deliveryData.status)}
             </span>
           </div>
           <div style={{ display: 'flex', gap: '10px' }}>
             <button 
               className="btn-primary" 
               onClick={handleNew}
-              disabled={deliveryData.status !== 'Done'}
-              style={{ opacity: deliveryData.status !== 'Done' ? 0.6 : 1 }}
+              disabled={deliveryData.status !== 'done'}
+              style={{ opacity: deliveryData.status !== 'done' ? 0.6 : 1 }}
             >
               New
             </button>
             <button 
               className="btn-primary" 
               onClick={handleValidate}
-              disabled={deliveryData.status === 'Done'}
-              style={{ backgroundColor: '#28a745', opacity: deliveryData.status === 'Done' ? 0.6 : 1 }}
+              disabled={deliveryData.status === 'done'}
+              style={{ backgroundColor: '#28a745', opacity: deliveryData.status === 'done' ? 0.6 : 1 }}
             >
-              {deliveryData.status === 'Draft' ? 'Check Stock' : deliveryData.status === 'Waiting' ? 'Recheck Stock' : 'Validate'}
+              {deliveryData.status === 'draft' ? 'Check Stock' : deliveryData.status === 'waiting' ? 'Recheck Stock' : 'Validate'}
             </button>
             <button className="btn-primary" onClick={handlePrint} style={{ backgroundColor: '#17a2b8' }}>
               Print
@@ -324,7 +349,7 @@ function Delivery() {
         </div>
 
         {/* Out of Stock Alert */}
-        {deliveryData.status === 'Waiting' && (
+        {deliveryData.status === 'waiting' && (
           <div style={{ padding: '15px', backgroundColor: '#f8d7da', color: '#721c24', marginBottom: '20px', borderRadius: '4px', border: '1px solid #f5c6cb' }}>
             <strong>⚠️ Warning:</strong> Some products are out of stock or insufficient quantity available. Please check the highlighted items below.
           </div>
@@ -349,20 +374,23 @@ function Delivery() {
                   type="date"
                   value={deliveryData.scheduleDate}
                   onChange={(e) => setDeliveryData(prev => ({ ...prev, scheduleDate: e.target.value }))}
-                  disabled={deliveryData.status === 'Done'}
+                  disabled={deliveryData.status === 'done'}
                   style={{ width: '100%', padding: '8px 12px', border: '1px solid #ddd', borderRadius: '4px' }}
                 />
               </div>
               <div>
                 <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>Delivery Address</label>
-                <input
-                  type="text"
+                <select
                   value={deliveryData.deliveryAddress}
                   onChange={(e) => setDeliveryData(prev => ({ ...prev, deliveryAddress: e.target.value }))}
-                  placeholder="Enter delivery address"
-                  disabled={deliveryData.status === 'Done'}
+                  disabled={deliveryData.status === 'done'}
                   style={{ width: '100%', padding: '8px 12px', border: '1px solid #ddd', borderRadius: '4px' }}
-                />
+                >
+                  <option value="">Select Customer</option>
+                  {customers.map(c => (
+                    <option key={c.id} value={c.name}>{c.name} - {c.address}</option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>Responsible</label>
@@ -378,7 +406,7 @@ function Delivery() {
                 <select
                   value={deliveryData.operationType}
                   onChange={(e) => setDeliveryData(prev => ({ ...prev, operationType: e.target.value }))}
-                  disabled={deliveryData.status === 'Done'}
+                  disabled={deliveryData.status === 'done'}
                   style={{ width: '100%', padding: '8px 12px', border: '1px solid #ddd', borderRadius: '4px' }}
                 >
                   {operationTypes.map(type => (
@@ -412,14 +440,14 @@ function Delivery() {
                     >
                       <td style={{ padding: '12px' }}>
                         <select
-                          value={product.sku}
-                          onChange={(e) => handleProductChange(product.id, 'sku', e.target.value)}
-                          disabled={deliveryData.status === 'Done'}
+                          value={product.product_id || ''}
+                          onChange={(e) => handleProductChange(product.id, 'product_id', e.target.value)}
+                          disabled={deliveryData.status === 'done'}
                           style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '4px' }}
                         >
                           <option value="">Select Product</option>
                           {availableProducts.map(p => (
-                            <option key={p.sku} value={p.sku}>[{p.sku}] {p.name}</option>
+                            <option key={p.id} value={p.id}>[{p.sku}] {p.name}</option>
                           ))}
                         </select>
                       </td>
@@ -428,7 +456,7 @@ function Delivery() {
                           type="number"
                           value={product.quantity}
                           onChange={(e) => handleProductChange(product.id, 'quantity', e.target.value)}
-                          disabled={deliveryData.status === 'Done'}
+                          disabled={deliveryData.status === 'done'}
                           min="0"
                           style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '4px', textAlign: 'right' }}
                         />
@@ -450,15 +478,15 @@ function Delivery() {
                       <td style={{ padding: '12px', textAlign: 'center' }}>
                         <button
                           onClick={() => handleRemoveProduct(product.id)}
-                          disabled={deliveryData.status === 'Done'}
-                          style={{ padding: '6px 12px', backgroundColor: '#dc3545', color: 'white', border: 'none', borderRadius: '4px', cursor: deliveryData.status === 'Done' ? 'not-allowed' : 'pointer', opacity: deliveryData.status === 'Done' ? 0.6 : 1 }}
+                          disabled={deliveryData.status === 'done'}
+                          style={{ padding: '6px 12px', backgroundColor: '#dc3545', color: 'white', border: 'none', borderRadius: '4px', cursor: deliveryData.status === 'done' ? 'not-allowed' : 'pointer', opacity: deliveryData.status === 'done' ? 0.6 : 1 }}
                         >
                           Remove
                         </button>
                       </td>
                     </tr>
                   ))}
-                  {deliveryData.status !== 'Done' && (
+                  {deliveryData.status !== 'done' && (
                     <tr>
                       <td colSpan="5" style={{ padding: '12px', textAlign: 'center' }}>
                         <button

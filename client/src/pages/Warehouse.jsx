@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getCurrentUser, removeToken } from '../api';
+import api, { getCurrentUser, removeToken } from '../api';
 
 function Warehouse() {
   const navigate = useNavigate();
@@ -9,21 +9,20 @@ function Warehouse() {
   const [activeTab, setActiveTab] = useState('Products');
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef(null);
-  const [warehouses, setWarehouses] = useState([
-    { id: 1, name: 'Main Warehouse', shortCode: 'WH', address: '123 Industrial Area, Mumbai', contact: '+91 1234567890' },
-    { id: 2, name: 'Secondary Warehouse', shortCode: 'WH2', address: '456 Storage Lane, Delhi', contact: '+91 0987654321' },
-  ]);
+  const [warehouses, setWarehouses] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [formData, setFormData] = useState({
     name: '',
-    shortCode: '',
+    code: '',
     address: '',
     contact: ''
   });
+  const [error, setError] = useState('');
 
   useEffect(() => {
     fetchUserData();
+    fetchWarehouses();
   }, []);
 
   useEffect(() => {
@@ -49,6 +48,18 @@ function Warehouse() {
     }
   };
 
+  const fetchWarehouses = async () => {
+    try {
+      const response = await api.get('/data/warehouses');
+      if (response.data.success) {
+        setWarehouses(response.data.data);
+      }
+    } catch (err) {
+      console.error('Error fetching warehouses:', err);
+      setError('Failed to load warehouses');
+    }
+  };
+
   const handleLogout = () => {
     removeToken();
     navigate('/login');
@@ -60,36 +71,63 @@ function Warehouse() {
   };
 
   const handleNewWarehouse = () => {
-    setFormData({ name: '', shortCode: '', address: '', contact: '' });
+    setFormData({ name: '', code: '', address: '', contact: '' });
     setEditingId(null);
     setShowForm(true);
   };
 
   const handleEdit = (warehouse) => {
-    setFormData(warehouse);
+    setFormData({
+      name: warehouse.name,
+      code: warehouse.code,
+      address: warehouse.address || '',
+      contact: warehouse.contact || ''
+    });
     setEditingId(warehouse.id);
     setShowForm(true);
   };
 
-  const handleSave = () => {
-    if (editingId) {
-      setWarehouses(warehouses.map(w => w.id === editingId ? { ...formData, id: editingId } : w));
-    } else {
-      setWarehouses([...warehouses, { ...formData, id: Date.now() }]);
+  const handleSave = async () => {
+    try {
+      if (editingId) {
+        // Update existing warehouse
+        const response = await api.put(`/data/warehouses/${editingId}`, formData);
+        if (response.data.success) {
+          await fetchWarehouses();
+        }
+      } else {
+        // Create new warehouse
+        const response = await api.post('/data/warehouses', formData);
+        if (response.data.success) {
+          await fetchWarehouses();
+        }
+      }
+      setShowForm(false);
+      setFormData({ name: '', code: '', address: '', contact: '' });
+      setEditingId(null);
+    } catch (err) {
+      console.error('Error saving warehouse:', err);
+      setError('Failed to save warehouse');
     }
-    setShowForm(false);
-    setFormData({ name: '', shortCode: '', address: '', contact: '' });
   };
 
   const handleCancel = () => {
     setShowForm(false);
-    setFormData({ name: '', shortCode: '', address: '', contact: '' });
+    setFormData({ name: '', code: '', address: '', contact: '' });
     setEditingId(null);
   };
 
-  const handleDelete = (id) => {
+  const handleDelete = async (id) => {
     if (window.confirm('Are you sure you want to delete this warehouse?')) {
-      setWarehouses(warehouses.filter(w => w.id !== id));
+      try {
+        const response = await api.delete(`/data/warehouses/${id}`);
+        if (response.data.success) {
+          await fetchWarehouses();
+        }
+      } catch (err) {
+        console.error('Error deleting warehouse:', err);
+        setError('Failed to delete warehouse');
+      }
     }
   };
 
@@ -168,7 +206,7 @@ function Warehouse() {
                 </div>
                 <div className="dropdown-divider"></div>
                 <button className="dropdown-item" onClick={() => setDropdownOpen(false)}>
-                  <span className="dropdown-icon">⚙️</span>
+                  <span className="dropdown-icon">⚙</span>
                   Account Settings
                 </button>
                 <button className="dropdown-item" onClick={() => setDropdownOpen(false)}>
@@ -177,7 +215,7 @@ function Warehouse() {
                 </button>
                 <div className="dropdown-divider"></div>
                 <button className="dropdown-item logout-item" onClick={handleLogout}>
-                  <span className="dropdown-icon">🚪</span>
+                  <span className="dropdown-icon">→</span>
                   Logout
                 </button>
               </div>
@@ -223,8 +261,8 @@ function Warehouse() {
                   <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>Short Code *</label>
                   <input
                     type="text"
-                    value={formData.shortCode}
-                    onChange={(e) => setFormData({ ...formData, shortCode: e.target.value.toUpperCase() })}
+                    value={formData.code}
+                    onChange={(e) => setFormData({ ...formData, code: e.target.value.toUpperCase() })}
                     placeholder="e.g., WH, WH2"
                     style={{ width: '100%', padding: '8px 12px', border: '1px solid #ddd', borderRadius: '4px' }}
                   />
@@ -253,8 +291,8 @@ function Warehouse() {
               <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
                 <button 
                   onClick={handleSave}
-                  disabled={!formData.name || !formData.shortCode || !formData.address}
-                  style={{ padding: '8px 16px', backgroundColor: '#28a745', color: 'white', border: 'none', borderRadius: '4px', cursor: formData.name && formData.shortCode && formData.address ? 'pointer' : 'not-allowed' }}
+                  disabled={!formData.name || !formData.code || !formData.address}
+                  style={{ padding: '8px 16px', backgroundColor: '#28a745', color: 'white', border: 'none', borderRadius: '4px', cursor: formData.name && formData.code && formData.address ? 'pointer' : 'not-allowed' }}
                 >
                   Save
                 </button>
@@ -297,10 +335,10 @@ function Warehouse() {
                             fontWeight: 'bold',
                             cursor: 'pointer'
                           }}
-                          onClick={() => navigate('/location', { state: { warehouseCode: warehouse.shortCode } })}
+                          onClick={() => navigate('/location', { state: { warehouseCode: warehouse.code } })}
                           title="Click to view locations"
                         >
-                          {warehouse.shortCode}
+                          {warehouse.code}
                         </span>
                       </div>
                       <div style={{ color: '#666', marginBottom: '8px' }}>

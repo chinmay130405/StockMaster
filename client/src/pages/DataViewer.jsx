@@ -38,8 +38,8 @@ function DataViewer() {
       
       // Fetch both data and schema
       const [dataResponse, schemaResponse] = await Promise.all([
-        api.get(`/data/${tableName}?limit=50`),
-        api.get(`/data/${tableName}/schema`)
+        api.get(`/data/table/${tableName}?limit=50`),
+        api.get(`/data/table/${tableName}/schema`)
       ]);
       
       setTableData(dataResponse.data);
