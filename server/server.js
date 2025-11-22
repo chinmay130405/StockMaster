@@ -9,6 +9,7 @@ require('dotenv').config();
 
 const { initDatabase } = require('./db');
 const authRoutes = require('./routes/auth');
+const inventoryRoutes = require('./routes/inventory');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -53,6 +54,9 @@ app.get('/health', (req, res) => {
 
 // Auth routes
 app.use('/api/auth', authRoutes);
+
+// Inventory routes
+app.use('/api/inventory', inventoryRoutes);
 
 // 404 handler
 app.use((req, res) => {

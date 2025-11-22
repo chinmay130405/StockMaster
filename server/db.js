@@ -60,11 +60,11 @@ async function initDatabase() {
 }
 
 /**
- * Get user by loginId
+ * Get user by loginId (using 'name' column in DB)
  */
 async function getUserByLoginId(loginId) {
   const result = await pool.query(
-    'SELECT * FROM users WHERE "loginId" = $1',
+    'SELECT * FROM users WHERE name = $1',
     [loginId]
   );
   return result.rows[0];
@@ -86,10 +86,10 @@ async function getUserByEmail(email) {
  */
 async function createUser(loginId, email, passwordHash) {
   const result = await pool.query(
-    `INSERT INTO users ("loginId", email, "passwordHash", "createdAt")
-     VALUES ($1, $2, $3, $4)
+    `INSERT INTO users (name, email, password_hash, role, is_active)
+     VALUES ($1, $2, $3, 'staff', true)
      RETURNING id`,
-    [loginId, email, passwordHash, new Date()]
+    [loginId, email, passwordHash]
   );
   return result.rows[0].id;
 }
@@ -100,7 +100,7 @@ async function createUser(loginId, email, passwordHash) {
 async function updateUserOTP(email, otpHash, otpExpires) {
   await pool.query(
     `UPDATE users 
-     SET "otpHash" = $1, "otpExpires" = $2, "otpAttempts" = 0, "lastOtpRequest" = $3
+     SET otp_hash = $1, otp_expires = $2, otp_attempts = 0, last_otp_request = $3
      WHERE email = $4`,
     [otpHash, new Date(otpExpires), new Date(), email]
   );
@@ -112,7 +112,7 @@ async function updateUserOTP(email, otpHash, otpExpires) {
 async function incrementOtpAttempts(email) {
   await pool.query(
     `UPDATE users 
-     SET "otpAttempts" = "otpAttempts" + 1
+     SET otp_attempts = otp_attempts + 1
      WHERE email = $1`,
     [email]
   );
@@ -124,7 +124,7 @@ async function incrementOtpAttempts(email) {
 async function clearUserOTP(email) {
   await pool.query(
     `UPDATE users 
-     SET "otpHash" = NULL, "otpExpires" = NULL, "otpAttempts" = 0
+     SET otp_hash = NULL, otp_expires = NULL, otp_attempts = 0
      WHERE email = $1`,
     [email]
   );
@@ -136,7 +136,7 @@ async function clearUserOTP(email) {
 async function updateUserPassword(email, passwordHash) {
   await pool.query(
     `UPDATE users 
-     SET "passwordHash" = $1
+     SET password_hash = $1
      WHERE email = $2`,
     [passwordHash, email]
   );
@@ -147,7 +147,7 @@ async function updateUserPassword(email, passwordHash) {
  */
 async function getUserById(id) {
   const result = await pool.query(
-    'SELECT id, "loginId", email, "createdAt" FROM users WHERE id = $1',
+    'SELECT id, name as "loginId", email FROM users WHERE id = $1',
     [id]
   );
   return result.rows[0];

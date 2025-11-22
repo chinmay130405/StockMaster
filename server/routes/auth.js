@@ -106,13 +106,13 @@ router.post('/signup', signupLimiter, async (req, res) => {
     }
 
     // Check if loginId already exists
-    const existingLoginId = getUserByLoginId(cleanLoginId);
+    const existingLoginId = await getUserByLoginId(cleanLoginId);
     if (existingLoginId) {
       return res.status(400).json({ error: 'LoginId already taken' });
     }
 
     // Check if email already exists
-    const existingEmail = getUserByEmail(cleanEmail);
+    const existingEmail = await getUserByEmail(cleanEmail);
     if (existingEmail) {
       return res.status(400).json({ error: 'Email already registered' });
     }
@@ -121,7 +121,7 @@ router.post('/signup', signupLimiter, async (req, res) => {
     const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
 
     // Create user
-    const userId = createUser(cleanLoginId, cleanEmail, passwordHash);
+    const userId = await createUser(cleanLoginId, cleanEmail, passwordHash);
 
     console.log(`✅ New user registered: ${cleanLoginId} (ID: ${userId})`);
 
@@ -149,15 +149,15 @@ router.post('/login', loginLimiter, async (req, res) => {
     }
 
     // Get user by loginId
-    const user = getUserByLoginId(cleanLoginId);
+    const user = await getUserByLoginId(cleanLoginId);
 
     // Always show same error message to prevent user enumeration
     if (!user) {
       return res.status(401).json({ error: 'Invalid Login Id or Password' });
     }
 
-    // Verify password
-    const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
+    // Verify password (database column is password_hash)
+    const isPasswordValid = await bcrypt.compare(password, user.password_hash);
     if (!isPasswordValid) {
       return res.status(401).json({ error: 'Invalid Login Id or Password' });
     }
@@ -165,10 +165,10 @@ router.post('/login', loginLimiter, async (req, res) => {
     // Generate JWT token
     const token = generateToken(user.id);
 
-    console.log(`✅ User logged in: ${user.loginId}`);
+    console.log(`✅ User logged in: ${user.name}`);
 
     res.status(200).json({
-      message: 'Login ok',
+      message: 'Login successful',
       token
     });
   } catch (error) {
@@ -383,10 +383,10 @@ router.post('/reset-password', async (req, res) => {
  * GET /api/auth/me
  * Get current user info (protected route)
  */
-router.get('/me', authenticateToken, (req, res) => {
+router.get('/me', authenticateToken, async (req, res) => {
   try {
     // User info attached by authenticateToken middleware
-    const user = getUserById(req.user.id);
+    const user = await getUserById(req.user.id);
     
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
@@ -396,13 +396,96 @@ router.get('/me', authenticateToken, (req, res) => {
       user: {
         id: user.id,
         loginId: user.loginId,
-        email: user.email,
-        createdAt: user.createdAt
+        email: user.email
       }
     });
   } catch (error) {
     console.error('Get user info error:', error);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * TEST ENDPOINT - Get all users (no authentication required)
+ * This is for testing database connectivity only
+ * Remove in production!
+ */
+router.get('/test-users', async (req, res) => {
+  try {
+    const { pool } = require('../db');
+    const result = await pool.query('SELECT id, email, name, phone, role, is_active FROM users ORDER BY email');
+    
+    console.log(`✅ Retrieved ${result.rows.length} users from database`);
+    
+    res.status(200).json({
+      success: true,
+      count: result.rows.length,
+      users: result.rows
+    });
+  } catch (error) {
+    console.error('Test users endpoint error:', error);
+    res.status(500).json({ 
+      error: 'Database error',
+      details: error.message
+    });
+  }
+});
+
+/**
+ * TEST ENDPOINT - Get all database tables
+ */
+router.get('/test-tables', async (req, res) => {
+  try {
+    const { pool } = require('../db');
+    const result = await pool.query(`
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = 'public' 
+      ORDER BY table_name
+    `);
+    
+    console.log(`✅ Found ${result.rows.length} tables in database`);
+    
+    res.status(200).json({
+      success: true,
+      count: result.rows.length,
+      tables: result.rows.map(r => r.table_name)
+    });
+  } catch (error) {
+    console.error('Test tables endpoint error:', error);
+    res.status(500).json({ 
+      error: 'Database error',
+      details: error.message
+    });
+  }
+});
+
+/**
+ * TEST ENDPOINT - Get column names for a specific table
+ */
+router.get('/test-columns/:tableName', async (req, res) => {
+  try {
+    const { pool } = require('../db');
+    const { tableName } = req.params;
+    
+    const result = await pool.query(`
+      SELECT column_name, data_type, is_nullable
+      FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = $1
+      ORDER BY ordinal_position
+    `, [tableName]);
+    
+    res.status(200).json({
+      success: true,
+      table: tableName,
+      columns: result.rows
+    });
+  } catch (error) {
+    console.error('Test columns error:', error);
+    res.status(500).json({ 
+      error: 'Database error',
+      details: error.message
+    });
   }
 });
 
