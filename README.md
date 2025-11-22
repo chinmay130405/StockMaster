@@ -2,7 +2,8 @@
 
 A modern, full-stack **warehouse management system** with multi-warehouse stock tracking, receipts, deliveries, internal transfers, and complete movement history.
 Built using **React + Node.js + Express + PostgreSQL + SQLite (Auth)**.
-
+video link : - 
+https://drive.google.com/drive/folders/19jRbk2RXDiPm6SgYUAiUyVh833hRx5DL?usp=sharing
 ---
 
 ## 🚀 **Key Features**
