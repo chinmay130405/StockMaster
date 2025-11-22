@@ -54,6 +54,212 @@ router.get('/products', async (req, res) => {
 });
 
 /**
+ * GET /api/inventory/product-categories
+ * Get all product categories
+ */
+router.get('/product-categories', async (req, res) => {
+  try {
+    const { pool } = require('../db');
+    
+    const result = await pool.query(`
+      SELECT 
+        id,
+        name,
+        parent_id,
+        description
+      FROM product_categories
+      ORDER BY name
+    `);
+    
+    console.log(`✅ Retrieved ${result.rows.length} product categories from database`);
+    
+    res.status(200).json({
+      success: true,
+      count: result.rows.length,
+      categories: result.rows
+    });
+  } catch (error) {
+    console.error('Get product categories error:', error);
+    res.status(500).json({ 
+      error: 'Database error',
+      details: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/inventory/products
+ * Create a new product with optional initial stock
+ */
+router.post('/products', async (req, res) => {
+  const client = await require('../db').pool.connect();
+  try {
+    const { 
+      sku, name, category_id, uom, description, default_cost, default_price, 
+      manufacturer_id, preferred_supplier_id, status, reorder_level, 
+      lead_time_days, initial_stock, location_id 
+    } = req.body;
+    
+    // Validate required fields
+    if (!sku || !name || !uom) {
+      return res.status(400).json({ error: 'SKU, name, and UOM are required' });
+    }
+    
+    await client.query('BEGIN');
+    
+    // Create the product
+    const productResult = await client.query(`
+      INSERT INTO products (
+        sku, name, category_id, uom, description, default_cost, default_price, 
+        manufacturer_id, preferred_supplier_id, status, reorder_level, lead_time_days,
+        created_at, updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())
+      RETURNING *
+    `, [
+      sku, name, category_id || null, uom, description || null, 
+      default_cost || 0, default_price || 0, manufacturer_id || null, 
+      preferred_supplier_id || null, status || 'Active', reorder_level || null, 
+      lead_time_days || null
+    ]);
+    
+    const product = productResult.rows[0];
+    
+    // If initial stock is provided, add it to stock_levels
+    if (initial_stock && initial_stock > 0 && location_id) {
+      await client.query(`
+        INSERT INTO stock_levels (product_id, location_id, quantity, created_at, updated_at)
+        VALUES ($1, $2, $3, NOW(), NOW())
+      `, [product.id, location_id, initial_stock]);
+      
+      console.log(`✅ Created product: ${name} (${sku}) with initial stock: ${initial_stock} at location ${location_id}`);
+    } else {
+      console.log(`✅ Created product: ${name} (${sku})`);
+    }
+    
+    await client.query('COMMIT');
+    
+    res.status(201).json({
+      success: true,
+      product: product,
+      message: initial_stock ? `Product created with ${initial_stock} units in stock` : 'Product created successfully'
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Create product error:', error);
+    res.status(500).json({ 
+      error: 'Database error',
+      details: error.message
+    });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * PUT /api/inventory/products/:id
+ * Update an existing product
+ */
+router.put('/products/:id', async (req, res) => {
+  try {
+    const { pool } = require('../db');
+    const { id } = req.params;
+    const { 
+      sku, name, category_id, uom, description, default_cost, default_price, 
+      manufacturer_id, preferred_supplier_id, status, reorder_level, lead_time_days 
+    } = req.body;
+    
+    const result = await pool.query(`
+      UPDATE products 
+      SET sku = $1, name = $2, category_id = $3, uom = $4, description = $5,
+          default_cost = $6, default_price = $7, manufacturer_id = $8, 
+          preferred_supplier_id = $9, status = $10, reorder_level = $11, 
+          lead_time_days = $12, updated_at = NOW()
+      WHERE id = $13
+      RETURNING *
+    `, [
+      sku, name, category_id || null, uom, description || null, 
+      default_cost, default_price, manufacturer_id || null, 
+      preferred_supplier_id || null, status, reorder_level || null, 
+      lead_time_days || null, id
+    ]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Product not found' });
+    }
+    
+    console.log(`✅ Updated product: ${name} (${sku})`);
+    
+    res.status(200).json({
+      success: true,
+      product: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Update product error:', error);
+    res.status(500).json({ 
+      error: 'Database error',
+      details: error.message
+    });
+  }
+});
+
+/**
+ * PUT /api/inventory/products/:id/stock
+ * Update stock levels for a product
+ */
+router.put('/products/:id/stock', async (req, res) => {
+  const client = await require('../db').pool.connect();
+  try {
+    const { id } = req.params;
+    const { location_id, quantity, adjustment_reason } = req.body;
+    
+    if (!location_id || quantity === undefined) {
+      return res.status(400).json({ error: 'location_id and quantity are required' });
+    }
+    
+    await client.query('BEGIN');
+    
+    // Check if stock level exists
+    const stockCheck = await client.query(
+      'SELECT id, quantity as current_qty FROM stock_levels WHERE product_id = $1 AND location_id = $2 FOR UPDATE',
+      [id, location_id]
+    );
+    
+    if (stockCheck.rows.length > 0) {
+      // Update existing stock
+      await client.query(
+        'UPDATE stock_levels SET quantity = $1, updated_at = NOW() WHERE id = $2',
+        [quantity, stockCheck.rows[0].id]
+      );
+    } else {
+      // Insert new stock level
+      await client.query(
+        'INSERT INTO stock_levels (product_id, location_id, quantity, created_at, updated_at) VALUES ($1, $2, $3, NOW(), NOW())',
+        [id, location_id, quantity]
+      );
+    }
+    
+    await client.query('COMMIT');
+    
+    console.log(`✅ Updated stock for product ${id} at location ${location_id}: ${quantity}`);
+    
+    res.status(200).json({
+      success: true,
+      message: 'Stock updated successfully'
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Update stock error:', error);
+    res.status(500).json({ 
+      error: 'Database error',
+      details: error.message
+    });
+  } finally {
+    client.release();
+  }
+});
+
+/**
  * GET /api/inventory/warehouses
  * Get all warehouses
  */
@@ -415,13 +621,27 @@ router.put('/receipts/:id/process', async (req, res) => {
       return res.status(400).json({ error: 'Receipt must be in Ready status to process' });
     }
 
+    // Determine a default location if receipt lines don't include a location
+    const defaultLocRes = await client.query('SELECT id FROM locations ORDER BY created_at LIMIT 1');
+    const defaultLocationId = defaultLocRes.rows[0] ? defaultLocRes.rows[0].id : null;
+
+    // Check if stock_movements table exists (some DBs don't have it)
+    const smCheck = await client.query("SELECT to_regclass('public.stock_movements') as r");
+    const hasStockMovements = !!smCheck.rows[0].r;
+
     // Update or insert stock levels for each line
     for (const line of linesResult.rows) {
-      // Check if stock level exists
+      const locId = line.location_id || defaultLocationId;
+      if (!locId) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'No location available to add stock to' });
+      }
+
+      // Check if stock level exists for this product+location
       const stockCheck = await client.query(
         `SELECT id, quantity FROM stock_levels 
-         WHERE product_id = $1 AND location_id = $2`,
-        [line.product_id, line.location_id]
+         WHERE product_id = $1 AND location_id = $2 FOR UPDATE`,
+        [line.product_id, locId]
       );
 
       if (stockCheck.rows.length > 0) {
@@ -430,26 +650,28 @@ router.put('/receipts/:id/process', async (req, res) => {
           `UPDATE stock_levels 
            SET quantity = quantity + $1, updated_at = NOW()
            WHERE product_id = $2 AND location_id = $3`,
-          [line.quantity, line.product_id, line.location_id]
+          [line.quantity, line.product_id, locId]
         );
       } else {
         // Insert new stock level
         await client.query(
           `INSERT INTO stock_levels (product_id, location_id, quantity, created_at, updated_at)
            VALUES ($1, $2, $3, NOW(), NOW())`,
-          [line.product_id, line.location_id, line.quantity]
+          [line.product_id, locId, line.quantity]
         );
       }
 
-      // Create stock movement record
-      await client.query(
-        `INSERT INTO stock_movements (
-          product_id, location_id, movement_type, quantity, 
-          reference_type, reference_id, created_at
-        )
-        VALUES ($1, $2, 'in', $3, 'receipt', $4, NOW())`,
-        [line.product_id, line.location_id, line.quantity, id]
-      );
+      // Create stock movement record if table exists
+      if (hasStockMovements) {
+        await client.query(
+          `INSERT INTO stock_movements (
+            product_id, location_id, movement_type, quantity, 
+            reference_type, reference_id, created_at
+          )
+          VALUES ($1, $2, 'in', $3, 'receipt', $4, NOW())`,
+          [line.product_id, locId, line.quantity, id]
+        );
+      }
     }
 
     // Update receipt status to Done
@@ -475,6 +697,126 @@ router.put('/receipts/:id/process', async (req, res) => {
       error: 'Failed to process receipt',
       details: error.message
     });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * PUT /api/inventory/deliveries/:id/process
+ * Decrement stock_levels when a delivery is processed (ship out)
+ */
+router.put('/deliveries/:id/process', async (req, res) => {
+  const client = await require('../db').pool.connect();
+  try {
+    const { id } = req.params;
+    await client.query('BEGIN');
+
+    // Get delivery and its lines
+    const deliveryRes = await client.query('SELECT * FROM deliveries WHERE id = $1 FOR UPDATE', [id]);
+    if (deliveryRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Delivery not found' });
+    }
+    const linesRes = await client.query('SELECT * FROM delivery_lines WHERE delivery_id = $1', [id]);
+    if (linesRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'No lines for this delivery' });
+    }
+
+    // For each line, decrement quantity from stock_levels across locations (highest qty first)
+    for (const line of linesRes.rows) {
+      let qtyToRemove = Number(line.quantity);
+
+      // Get stock rows for product ordered by quantity desc
+      const stockRows = (await client.query(
+        `SELECT id, location_id, quantity FROM stock_levels WHERE product_id = $1 AND quantity > 0 ORDER BY quantity DESC FOR UPDATE`,
+        [line.product_id]
+      )).rows;
+
+      let totalAvailable = stockRows.reduce((s, r) => s + Number(r.quantity), 0);
+      if (totalAvailable < qtyToRemove) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Insufficient stock to fulfill delivery', product_id: line.product_id });
+      }
+
+      for (const sr of stockRows) {
+        if (qtyToRemove <= 0) break;
+        const take = Math.min(qtyToRemove, Number(sr.quantity));
+        await client.query('UPDATE stock_levels SET quantity = quantity - $1, updated_at = NOW() WHERE id = $2', [take, sr.id]);
+        qtyToRemove -= take;
+      }
+    }
+
+    // Update delivery status to Done
+    await client.query('UPDATE deliveries SET status = $1, updated_at = NOW() WHERE id = $2', ['Done', id]);
+
+    await client.query('COMMIT');
+    console.log(`✅ Processed delivery ID ${id} - stock decremented`);
+    res.status(200).json({ success: true, message: 'Delivery processed - stock updated' });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Process delivery error:', error);
+    res.status(500).json({ error: 'Failed to process delivery', details: error.message });
+  } finally {
+    client.release();
+  }
+});
+
+
+/**
+ * PUT /api/inventory/internal-transfers/:id/process
+ * Move stock from from_location to to_location
+ */
+router.put('/internal-transfers/:id/process', async (req, res) => {
+  const client = await require('../db').pool.connect();
+  try {
+    const { id } = req.params;
+    await client.query('BEGIN');
+
+    const transferRes = await client.query('SELECT * FROM internal_transfers WHERE id = $1 FOR UPDATE', [id]);
+    if (transferRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Transfer not found' });
+    }
+    const transfer = transferRes.rows[0];
+
+    const linesRes = await client.query('SELECT * FROM internal_transfer_lines WHERE transfer_id = $1', [id]);
+    if (linesRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'No lines for this transfer' });
+    }
+
+    for (const line of linesRes.rows) {
+      const qty = Number(line.quantity);
+
+      // decrement from from_location
+      const fromStock = (await client.query('SELECT id, quantity FROM stock_levels WHERE product_id = $1 AND location_id = $2 FOR UPDATE', [line.product_id, transfer.from_location])).rows[0];
+      if (!fromStock || Number(fromStock.quantity) < qty) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Insufficient stock at source location', product_id: line.product_id });
+      }
+
+      await client.query('UPDATE stock_levels SET quantity = quantity - $1, updated_at = NOW() WHERE id = $2', [qty, fromStock.id]);
+
+      // increment to to_location (upsert)
+      const toStockRes = await client.query('SELECT id FROM stock_levels WHERE product_id = $1 AND location_id = $2 FOR UPDATE', [line.product_id, transfer.to_location]);
+      if (toStockRes.rows.length > 0) {
+        await client.query('UPDATE stock_levels SET quantity = quantity + $1, updated_at = NOW() WHERE id = $2', [qty, toStockRes.rows[0].id]);
+      } else {
+        await client.query('INSERT INTO stock_levels (product_id, location_id, quantity, created_at, updated_at) VALUES ($1, $2, $3, NOW(), NOW())', [line.product_id, transfer.to_location, qty]);
+      }
+    }
+
+    await client.query('UPDATE internal_transfers SET status = $1, updated_at = NOW() WHERE id = $2', ['Done', id]);
+
+    await client.query('COMMIT');
+    console.log(`✅ Processed transfer ID ${id} - stock moved`);
+    res.status(200).json({ success: true, message: 'Transfer processed - stock moved' });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Process transfer error:', error);
+    res.status(500).json({ error: 'Failed to process transfer', details: error.message });
   } finally {
     client.release();
   }
