@@ -33,27 +33,37 @@ function Operations() {
     try {
       setLoading(true);
       const [receiptsRes, deliveriesRes] = await Promise.all([
-        fetch(`${API_URL}/inventory/receipts`).then(r => r.json()),
-        fetch(`${API_URL}/inventory/deliveries`).then(r => r.json())
+        axios.get(`${API_URL}/inventory/receipts`),
+        axios.get(`${API_URL}/inventory/deliveries`)
       ]);
 
-      setReceipts(receiptsRes.receipts || []);
-      setDeliveries(deliveriesRes.deliveries || []);
+      console.log('Receipts data:', receiptsRes.data);
+      console.log('Deliveries data:', deliveriesRes.data);
+
+      const receiptsData = receiptsRes.data.receipts || [];
+      const deliveriesData = deliveriesRes.data.deliveries || [];
+
+      setReceipts(receiptsData);
+      setDeliveries(deliveriesData);
 
       // Calculate stats
+      const now = new Date();
       const receiptStats = {
-        late: receiptsRes.receipts?.filter(r => r.status === 'Ready' && new Date(r.schedule_date) < new Date()).length || 0,
-        waiting: receiptsRes.receipts?.filter(r => r.status === 'Ready').length || 0,
-        total: receiptsRes.receipts?.length || 0,
-        toReceive: receiptsRes.receipts?.filter(r => r.status === 'Ready').length || 0
+        late: receiptsData.filter(r => r.status === 'Ready' && new Date(r.receipt_date) < now).length,
+        waiting: receiptsData.filter(r => r.status === 'Waiting').length,
+        toReceive: receiptsData.filter(r => r.status === 'Ready').length,
+        total: receiptsData.length
       };
 
       const deliveryStats = {
-        late: deliveriesRes.deliveries?.filter(d => d.status === 'Ready' && new Date(d.schedule_date) < new Date()).length || 0,
-        waiting: deliveriesRes.deliveries?.filter(d => d.status === 'Waiting' || d.status === 'Ready').length || 0,
-        total: deliveriesRes.deliveries?.length || 0,
-        toDeliver: deliveriesRes.deliveries?.filter(d => d.status === 'Ready').length || 0
+        late: deliveriesData.filter(d => (d.status === 'Ready' || d.status === 'Waiting') && new Date(d.expected_delivery_date) < now).length,
+        waiting: deliveriesData.filter(d => d.status === 'Waiting').length,
+        toDeliver: deliveriesData.filter(d => d.status === 'Ready').length,
+        total: deliveriesData.length
       };
+
+      console.log('Receipt stats:', receiptStats);
+      console.log('Delivery stats:', deliveryStats);
 
       setOperations({
         receipt: receiptStats,
@@ -173,7 +183,7 @@ function Operations() {
             {/* Stats */}
             <div style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+              gridTemplateColumns: 'repeat(4, 1fr)',
               gap: '20px',
               marginBottom: '30px'
             }}>
@@ -197,6 +207,17 @@ function Operations() {
                 <div style={{ fontSize: '14px', color: '#666', marginBottom: '8px' }}>Waiting</div>
                 <div style={{ fontSize: '36px', fontWeight: '700', color: '#ff9800' }}>
                   {operations.receipt.waiting}
+                </div>
+              </div>
+              <div style={{
+                backgroundColor: '#fff',
+                padding: '24px',
+                borderRadius: '8px',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+              }}>
+                <div style={{ fontSize: '14px', color: '#666', marginBottom: '8px' }}>To Receive</div>
+                <div style={{ fontSize: '36px', fontWeight: '700', color: '#2196f3' }}>
+                  {operations.receipt.toReceive}
                 </div>
               </div>
               <div style={{
@@ -230,7 +251,7 @@ function Operations() {
                   Recent Receipt Operations ({receipts.length})
                 </h3>
                 <button 
-                  onClick={() => console.log('Create new receipt')}
+                  onClick={() => navigate('/create-receipt')}
                   style={{
                     background: '#1976d2',
                     color: 'white',
@@ -325,7 +346,7 @@ function Operations() {
             {/* Stats */}
             <div style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+              gridTemplateColumns: 'repeat(4, 1fr)',
               gap: '20px',
               marginBottom: '30px'
             }}>
@@ -349,6 +370,17 @@ function Operations() {
                 <div style={{ fontSize: '14px', color: '#666', marginBottom: '8px' }}>Waiting</div>
                 <div style={{ fontSize: '36px', fontWeight: '700', color: '#ff9800' }}>
                   {operations.delivery.waiting}
+                </div>
+              </div>
+              <div style={{
+                backgroundColor: '#fff',
+                padding: '24px',
+                borderRadius: '8px',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+              }}>
+                <div style={{ fontSize: '14px', color: '#666', marginBottom: '8px' }}>To Deliver</div>
+                <div style={{ fontSize: '36px', fontWeight: '700', color: '#4caf50' }}>
+                  {operations.delivery.toDeliver}
                 </div>
               </div>
               <div style={{
@@ -382,7 +414,7 @@ function Operations() {
                   Recent Delivery Operations ({deliveries.length})
                 </h3>
                 <button 
-                  onClick={() => console.log('Create new delivery')}
+                  onClick={() => navigate('/create-delivery')}
                   style={{
                     background: '#4caf50',
                     color: 'white',
@@ -491,7 +523,7 @@ function Operations() {
                   Inventory Adjustments
                 </h3>
                 <button 
-                  onClick={() => console.log('Create new adjustment')}
+                  onClick={() => navigate('/create-adjustment')}
                   style={{
                     background: '#9c27b0',
                     color: 'white',

@@ -10,6 +10,8 @@ import Locations from './pages/Locations';
 import MoveHistory from './pages/MoveHistory';
 import Settings from './pages/Settings';
 import CreateReceipt from './pages/CreateReceipt';
+import CreateDelivery from './pages/CreateDelivery';
+import CreateAdjustment from './pages/CreateAdjustment';
 import './index.css';
 
 function App() {
@@ -25,6 +27,8 @@ function App() {
         <Route path="/warehouses" element={<Layout><Warehouses /></Layout>} />
         <Route path="/locations" element={<Layout><Locations /></Layout>} />
         <Route path="/create-receipt" element={<Layout><CreateReceipt /></Layout>} />
+        <Route path="/create-delivery" element={<Layout><CreateDelivery /></Layout>} />
+        <Route path="/create-adjustment" element={<Layout><CreateAdjustment /></Layout>} />
         
         {/* Test Database Page (without layout) */}
         <Route path="/test-database" element={<TestDatabase />} />

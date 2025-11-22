@@ -6,7 +6,6 @@ function Warehouses() {
   const navigate = useNavigate();
   const [warehouses, setWarehouses] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('Products');
 
   useEffect(() => {
     fetchWarehouses();
@@ -23,85 +22,17 @@ function Warehouses() {
     }
   };
 
-  const tabs = ['Dashboard', 'Operations', 'Products', 'Move History', 'Settings'];
-
-  const navigateToTab = (tab) => {
-    setActiveTab(tab);
-    const routes = {
-      'Dashboard': '/',
-      'Operations': '/operations',
-      'Products': '/products',
-      'Move History': '/move-history',
-      'Settings': '/settings'
-    };
-    navigate(routes[tab]);
-  };
-
   return (
-    <div style={{ minHeight: '100vh', backgroundColor: '#f5f5f5' }}>
-      {/* Top Navigation */}
-      <nav style={{
-        backgroundColor: '#fff',
-        borderBottom: '1px solid #e0e0e0',
-        padding: '0 20px',
-        boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
-      }}>
-        <div style={{
-          maxWidth: '1400px',
-          margin: '0 auto',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between'
-        }}>
-          <div style={{ display: 'flex', gap: '5px' }}>
-            {tabs.map(tab => (
-              <button
-                key={tab}
-                onClick={() => navigateToTab(tab)}
-                style={{
-                  padding: '16px 24px',
-                  border: 'none',
-                  backgroundColor: activeTab === tab ? '#f0f0f0' : 'transparent',
-                  borderBottom: activeTab === tab ? '3px solid #1976d2' : '3px solid transparent',
-                  color: activeTab === tab ? '#1976d2' : '#666',
-                  cursor: 'pointer',
-                  fontSize: '14px',
-                  fontWeight: activeTab === tab ? '600' : '500'
-                }}
-              >
-                {tab}
-              </button>
-            ))}
-          </div>
-          <div style={{
-            width: '40px',
-            height: '40px',
-            borderRadius: '50%',
-            backgroundColor: '#1976d2',
-            color: 'white',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontWeight: '600'
-          }}>
-            SM
-          </div>
-        </div>
-      </nav>
+    <>
+      <h1 style={{ fontSize: '32px', fontWeight: '600', color: '#333', marginBottom: '8px' }}>
+        Warehouses
+      </h1>
+      <p style={{ color: '#666', fontSize: '14px', marginBottom: '30px' }}>
+        Manage warehouse details and locations
+      </p>
 
-      {/* Main Content */}
-      <main style={{ maxWidth: '1400px', margin: '0 auto', padding: '40px 20px' }}>
-        <div style={{ marginBottom: '30px' }}>
-          <h1 style={{ fontSize: '32px', fontWeight: '600', color: '#333', marginBottom: '8px' }}>
-            Warehouses
-          </h1>
-          <p style={{ color: '#666', fontSize: '14px' }}>
-            Manage warehouse details and locations
-          </p>
-        </div>
-
-        {/* Add Warehouse Button */}
-        <div style={{ marginBottom: '30px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      {/* Add Warehouse Button */}
+      <div style={{ marginBottom: '30px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ fontSize: '18px', fontWeight: '600', color: '#333' }}>
             Total Warehouses: {warehouses.length}
           </div>
@@ -239,8 +170,7 @@ function Warehouses() {
             ))}
           </div>
         )}
-      </main>
-    </div>
+    </>
   );
 }
 

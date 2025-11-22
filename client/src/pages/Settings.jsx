@@ -44,13 +44,13 @@ function Settings() {
   };
 
   return (
-    <div className="settings-page">
-      <div className="content-header" style={{ marginBottom: '2rem' }}>
-        <h1 className="page-title">Settings</h1>
-        <p style={{ color: '#64748b', marginTop: '0.5rem' }}>
-          Manage your account settings and preferences
-        </p>
-      </div>
+    <>
+      <h1 style={{ fontSize: '32px', fontWeight: '600', color: '#333', marginBottom: '8px' }}>
+        Settings
+      </h1>
+      <p style={{ color: '#666', fontSize: '14px', marginBottom: '30px' }}>
+        Manage your account settings and preferences
+      </p>
 
       <div style={{ display: 'grid', gridTemplateColumns: '250px 1fr', gap: '2rem' }}>
         {/* Settings Navigation */}
@@ -286,7 +286,7 @@ function Settings() {
           )}
         </div>
       </div>
-    </div>
+    </>
   );
 }
 

@@ -621,6 +621,204 @@ router.get('/stock-movements', async (req, res) => {
 });
 
 /**
+ * GET /api/inventory/stock-levels
+ * Get all stock levels
+ */
+router.get('/stock-levels', async (req, res) => {
+  try {
+    const { pool } = require('../db');
+    
+    const result = await pool.query(`
+      SELECT 
+        sl.id,
+        sl.product_id,
+        sl.location_id,
+        sl.quantity,
+        p.name as product_name,
+        p.sku,
+        l.name as location_name,
+        w.name as warehouse_name
+      FROM stock_levels sl
+      JOIN products p ON sl.product_id = p.id
+      JOIN locations l ON sl.location_id = l.id
+      JOIN warehouses w ON l.warehouse_id = w.id
+      ORDER BY p.name, l.name
+    `);
+    
+    console.log(`✅ Retrieved ${result.rows.length} stock levels from database`);
+    
+    res.status(200).json({
+      success: true,
+      count: result.rows.length,
+      stockLevels: result.rows
+    });
+  } catch (error) {
+    console.error('Get stock levels error:', error);
+    res.status(500).json({ 
+      error: 'Database error',
+      details: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/inventory/adjustments
+ * Create a new inventory adjustment
+ */
+router.post('/adjustments', async (req, res) => {
+  const client = await require('../db').pool.connect();
+  
+  try {
+    const { adjustmentDate, reason, responsible, notes, lines } = req.body;
+
+    // Validation
+    if (!lines || lines.length === 0) {
+      return res.status(400).json({ error: 'Missing required fields - need at least one adjustment line' });
+    }
+
+    await client.query('BEGIN');
+
+    // Generate adjustment number
+    const countResult = await client.query('SELECT COUNT(*) as count FROM stock_movements WHERE movement_type = \'adjustment\'');
+    const adjustmentCount = parseInt(countResult.rows[0].count) + 1;
+    const adjustmentNo = `WH/ADJ/${String(adjustmentCount).padStart(4, '0')}`;
+
+    // Insert adjustment lines and update stock
+    for (const line of lines) {
+      // Check if stock level exists
+      const stockCheck = await client.query(
+        `SELECT id, quantity FROM stock_levels 
+         WHERE product_id = $1 AND location_id = $2`,
+        [line.productId, line.locationId]
+      );
+
+      if (stockCheck.rows.length > 0) {
+        // Update existing stock
+        await client.query(
+          `UPDATE stock_levels 
+           SET quantity = quantity + $1, updated_at = NOW()
+           WHERE product_id = $2 AND location_id = $3`,
+          [line.adjustmentQuantity, line.productId, line.locationId]
+        );
+      } else {
+        // Insert new stock level (if adjustment is positive)
+        if (line.adjustmentQuantity > 0) {
+          await client.query(
+            `INSERT INTO stock_levels (product_id, location_id, quantity, created_at, updated_at)
+             VALUES ($1, $2, $3, NOW(), NOW())`,
+            [line.productId, line.locationId, line.adjustmentQuantity]
+          );
+        }
+      }
+
+      // Create stock movement record
+      await client.query(
+        `INSERT INTO stock_movements (
+          product_id, location_id, movement_type, quantity, 
+          reference_type, reference_id, notes, created_at
+        )
+        VALUES ($1, $2, 'adjustment', $3, 'adjustment', $4, $5, NOW())`,
+        [
+          line.productId, 
+          line.locationId, 
+          line.adjustmentQuantity,
+          adjustmentNo,
+          `${reason} - ${line.lineReason || ''}`.trim()
+        ]
+      );
+    }
+
+    await client.query('COMMIT');
+
+    console.log(`✅ Created adjustment ${adjustmentNo} with ${lines.length} lines`);
+
+    res.status(201).json({
+      success: true,
+      message: 'Adjustment created successfully',
+      adjustment: {
+        adjustmentNo: adjustmentNo
+      }
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Create adjustment error:', error);
+    res.status(500).json({ 
+      error: 'Failed to create adjustment',
+      details: error.message
+    });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * POST /api/inventory/deliveries
+ * Create a new delivery
+ */
+router.post('/deliveries', async (req, res) => {
+  const client = await require('../db').pool.connect();
+  
+  try {
+    const { deliveryAddress, responsible, scheduleDate, warehouseId, notes, lines } = req.body;
+
+    // Validation
+    if (!lines || lines.length === 0) {
+      return res.status(400).json({ error: 'Missing required fields - need at least one product line' });
+    }
+
+    await client.query('BEGIN');
+
+    // Generate delivery number
+    const countResult = await client.query('SELECT COUNT(*) as count FROM deliveries');
+    const deliveryCount = parseInt(countResult.rows[0].count) + 1;
+    const deliveryNo = `WH/OUT/${String(deliveryCount).padStart(4, '0')}`;
+
+    // Insert delivery header
+    const deliveryResult = await client.query(
+      `INSERT INTO deliveries (delivery_no, delivery_address, expected_delivery_date, delivered_by, status, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, 'Draft', NOW(), NOW())
+       RETURNING id`,
+      [deliveryNo, deliveryAddress, scheduleDate || new Date(), responsible || null]
+    );
+
+    const deliveryId = deliveryResult.rows[0].id;
+
+    // Insert delivery lines
+    for (const line of lines) {
+      const lineTotal = (parseFloat(line.quantity) || 0) * (parseFloat(line.unitPrice) || 0);
+      
+      await client.query(
+        `INSERT INTO delivery_lines (delivery_id, product_id, quantity, unit_price, line_total, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, NOW(), NOW())`,
+        [deliveryId, line.productId, line.quantity, line.unitPrice || 0, lineTotal]
+      );
+    }
+
+    await client.query('COMMIT');
+
+    console.log(`✅ Created delivery ${deliveryNo} with ${lines.length} lines`);
+
+    res.status(201).json({
+      success: true,
+      message: 'Delivery created successfully',
+      delivery: {
+        id: deliveryId,
+        deliveryNo: deliveryNo
+      }
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Create delivery error:', error);
+    res.status(500).json({ 
+      error: 'Failed to create delivery',
+      details: error.message
+    });
+  } finally {
+    client.release();
+  }
+});
+
+/**
  * GET /api/inventory/dashboard-stats
  * Get dashboard statistics
  */
